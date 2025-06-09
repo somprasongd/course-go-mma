@@ -3,16 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"go-mma/application/middleware"
+	"go-mma/util/logger"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
-	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
@@ -23,15 +24,21 @@ var (
 )
 
 func main() {
+	closeLog, err := logger.Init()
+	if err != nil {
+		panic(err.Error())
+	}
+	defer closeLog()
+
 	app := fiber.New(fiber.Config{
 		AppName: fmt.Sprintf("Go MMA version %s", Version),
 	})
 
 	// กำหนด global middleware
-	app.Use(cors.New())      // CORS ลำดับแรก เพื่อให้ OPTIONS request ผ่านได้เสมอ
-	app.Use(requestid.New()) // สร้าง request id ใน request header สำหรับการ debug
-	app.Use(recover.New())   // auto-recovers from panic (internal only)
-	app.Use(logger.New())    // logs HTTP request
+	app.Use(cors.New())                 // CORS ลำดับแรก เพื่อให้ OPTIONS request ผ่านได้เสมอ
+	app.Use(requestid.New())            // สร้าง request id ใน request header สำหรับการ debug
+	app.Use(recover.New())              // auto-recovers from panic (internal only)
+	app.Use(middleware.RequestLogger()) // logs HTTP request
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(map[string]string{"version": Version, "time": Time})
@@ -66,7 +73,7 @@ func main() {
 	// ย้ายมา run server ใน goroutine
 	go func() {
 		if err := app.Listen(":8090"); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Error starting server: %v", err)
+			logger.Log.Fatal(fmt.Sprintf("Error starting server: %v", err))
 		}
 	}()
 
@@ -75,16 +82,16 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
-	log.Println("Shutting down...")
+	logger.Log.Info("Shutting down...")
 
 	// หยุดรับ request ใหม่ แล้ว รอให้ request เดิมทำงานเสร็จ ภายใน timeout ที่กำหนด (เช่น 5 วินาที)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := app.ShutdownWithContext(ctx); err != nil {
-		log.Fatalf("Error shutting down server: %v", err)
+		logger.Log.Fatal(fmt.Sprintf("Error shutting down server: %v", err))
 	}
 
 	// Optionally: แล้วค่อยปิด resource อื่นๆ เช่น DB connection, cleanup, etc.
 
-	log.Println("Shutdown complete.")
+	logger.Log.Info("Shutdown complete.")
 }
