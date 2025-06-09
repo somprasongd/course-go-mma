@@ -16,3 +16,10 @@ build:
 	"-X 'go-mma/build.Version=${BUILD_VERSION}' \
 	-X 'go-mma/build.Time=${BUILD_TIME}'" \
 	-o app cmd/api/main.go
+
+.PHONY: image
+image:
+	docker build \
+	-t go-mma:${BUILD_VERSION} \
+	--build-arg VERSION=${BUILD_VERSION} \
+	.
