@@ -3,4 +3,4 @@ export
 
 .PHONY: run
 run:
-	go run main.go
+	go run cmd/api/main.go
