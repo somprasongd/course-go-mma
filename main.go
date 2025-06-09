@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"go-mma/application/middleware"
+	"go-mma/config"
 	"go-mma/util/logger"
 
 	"github.com/gofiber/fiber/v3"
@@ -29,6 +31,11 @@ func main() {
 		panic(err.Error())
 	}
 	defer closeLog()
+
+	config, err := config.Load()
+	if err != nil {
+		log.Panic(err)
+	}
 
 	app := fiber.New(fiber.Config{
 		AppName: fmt.Sprintf("Go MMA version %s", Version),
@@ -72,7 +79,7 @@ func main() {
 
 	// ย้ายมา run server ใน goroutine
 	go func() {
-		if err := app.Listen(":8090"); err != nil && err != http.ErrServerClosed {
+		if err := app.Listen(fmt.Sprintf(":%d", config.HTTPPort)); err != nil && err != http.ErrServerClosed {
 			logger.Log.Fatal(fmt.Sprintf("Error starting server: %v", err))
 		}
 	}()
@@ -85,7 +92,7 @@ func main() {
 	logger.Log.Info("Shutting down...")
 
 	// หยุดรับ request ใหม่ แล้ว รอให้ request เดิมทำงานเสร็จ ภายใน timeout ที่กำหนด (เช่น 5 วินาที)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), config.GracefulTimeout)
 	defer cancel()
 	if err := app.ShutdownWithContext(ctx); err != nil {
 		logger.Log.Fatal(fmt.Sprintf("Error shutting down server: %v", err))
