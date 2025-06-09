@@ -1,7 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -37,7 +44,8 @@ func main() {
 	customers := v1.Group("/customers")
 	{
 		customers.Post("", func(c fiber.Ctx) error {
-			// เพิ่มการกำหนด status code ด้วย Status()
+			// เพิ่มหน่วงเวลา 3 วินาที สำหรับทดสอบ Graceful Shutdown
+			time.Sleep(3 * time.Second)
 			return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": 1})
 		})
 	}
@@ -55,5 +63,28 @@ func main() {
 		})
 	}
 
-	app.Listen(":8090")
+	// ย้ายมา run server ใน goroutine
+	go func() {
+		if err := app.Listen(":8090"); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Error starting server: %v", err)
+		}
+	}()
+
+	// รอสัญญาณการปิด
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+
+	log.Println("Shutting down...")
+
+	// หยุดรับ request ใหม่ แล้ว รอให้ request เดิมทำงานเสร็จ ภายใน timeout ที่กำหนด (เช่น 5 วินาที)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := app.ShutdownWithContext(ctx); err != nil {
+		log.Fatalf("Error shutting down server: %v", err)
+	}
+
+	// Optionally: แล้วค่อยปิด resource อื่นๆ เช่น DB connection, cleanup, etc.
+
+	log.Println("Shutdown complete.")
 }
