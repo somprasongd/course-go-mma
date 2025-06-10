@@ -78,8 +78,9 @@ func (s *httpServer) RegisterRoutes(dbCtx sqldb.DBContext) {
 	{
 		// กำหนด dependency ระหว่างเลเยอร์
 		repo := repository.NewCustomerRepository(dbCtx)
-		// ส่ง instance ของ repository เข้า service
-		svc := service.NewCustomerService(repo)
+		svcNoti := service.NewNotificationService() // <-- เพิ่มตรงนี้
+		// ส่ง instance ของ repository, notiSvc เข้า service
+		svc := service.NewCustomerService(repo, svcNoti) // <-- เพิ่มตรงนี้
 		// ส่ง service เข้า handler
 		hdlr := handler.NewCustomerHandler(svc)
 		// Register routes เข้ากับ HTTP server
