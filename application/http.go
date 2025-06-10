@@ -47,6 +47,7 @@ func newFiber() *fiber.App {
 	app.Use(requestid.New())            // สร้าง request id ใน request header สำหรับการ debug
 	app.Use(recover.New())              // auto-recovers from panic (internal only)
 	app.Use(middleware.RequestLogger()) // logs HTTP request
+	app.Use(middleware.ResponseError())
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(map[string]string{"version": build.Version, "time": build.Time})

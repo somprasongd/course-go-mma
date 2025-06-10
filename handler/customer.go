@@ -6,7 +6,6 @@ import (
 	"go-mma/service"
 	"go-mma/util/errs"
 	"go-mma/util/logger"
-	"go-mma/util/response"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -25,16 +24,16 @@ func (h *CustomerHandler) CreateCustomer(c fiber.Ctx) error {
 	// แปลง request body -> dto
 	var req dto.CreateCustomerRequest
 	if err := c.Bind().Body(&req); err != nil {
-		// <-- เปลี่ยนมาใช้ reponse จัดการ Error
-		return response.JSONError(c, errs.InputValidationError(err.Error()))
+		// <-- return error ออกไปเลย
+		return errs.InputValidationError(err.Error())
 	}
 
 	logger.Log.Info(fmt.Sprintf("Received customer: %v", req))
 
 	// ตรวจสอบ input fields (e.g., value, format, etc.)
 	if err := req.Validate(); err != nil {
-		// <-- เปลี่ยนมาใช้ reponse จัดการ Error
-		return response.JSONError(c, errs.InputValidationError(err.Error()))
+		// <-- return error ออกไปเลย
+		return errs.InputValidationError(err.Error())
 	}
 
 	// ส่งไปที่ Service Layer
@@ -42,8 +41,8 @@ func (h *CustomerHandler) CreateCustomer(c fiber.Ctx) error {
 
 	// จัดการ error จาก Service Layer หากเกิดขึ้น
 	if err != nil {
-		// <-- เปลี่ยนมาใช้ reponse จัดการ Error
-		return response.JSONError(c, err)
+		// <-- return error ออกไปเลย
+		return err
 	}
 
 	// ตอบกลับด้วย status code 201 (created) และข้อมูลแบบ JSON
