@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"go-mma/model"
 	"go-mma/util/errs"
-	"go-mma/util/storage/sqldb"
+	"go-mma/util/storage/sqldb/transactor"
 	"time"
 )
 
 type CustomerRepository struct {
-	dbCtx sqldb.DBContext // ใช้งาน database ผ่าน DBContext interface
+	dbCtx transactor.DBTXContext // ใช้งาน database ผ่าน transactor.DBContext interface
 }
 
-func NewCustomerRepository(dbCtx sqldb.DBContext) *CustomerRepository {
+func NewCustomerRepository(dbCtx transactor.DBTXContext) *CustomerRepository {
 	return &CustomerRepository{
-		dbCtx: dbCtx, // inject DBContext instance into CustomerRepository
+		dbCtx: dbCtx,
 	}
 }
 
@@ -31,9 +31,9 @@ func (r *CustomerRepository) Create(ctx context.Context, customer *model.Custome
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	err := r.dbCtx.DB().
-		QueryRowxContext(ctx, query, customer.ID, customer.Email, customer.Credit).
-		StructScan(customer) // นำค่า created_at, updated_at ใส่ใน struct customer
+	err := r.dbCtx(ctx). // <-- จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+				QueryRowxContext(ctx, query, customer.ID, customer.Email, customer.Credit).
+				StructScan(customer) // นำค่า created_at, updated_at ใส่ใน struct customer
 	if err != nil {
 		return errs.HandleDBError(fmt.Errorf("an error occurred while inserting customer: %w", err))
 	}
@@ -47,7 +47,7 @@ func (r *CustomerRepository) ExistsByEmail(ctx context.Context, email string) (b
 	defer cancel()
 
 	var exists int
-	err := r.dbCtx.DB().
+	err := r.dbCtx(ctx).
 		QueryRowxContext(ctx, query, email).
 		Scan(&exists)
 	if err != nil {
@@ -69,7 +69,7 @@ func (r *CustomerRepository) FindByID(ctx context.Context, id int64) (*model.Cus
 	defer cancel()
 
 	var customer model.Customer
-	err := r.dbCtx.DB().QueryRowxContext(ctx, query, id).StructScan(&customer)
+	err := r.dbCtx(ctx).QueryRowxContext(ctx, query, id).StructScan(&customer)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -90,7 +90,7 @@ func (r *CustomerRepository) UpdateCredit(ctx context.Context, m *model.Customer
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	err := r.dbCtx.DB().QueryRowxContext(ctx, query, m.ID, m.Credit).StructScan(m)
+	err := r.dbCtx(ctx).QueryRowxContext(ctx, query, m.ID, m.Credit).StructScan(m)
 	if err != nil {
 		return errs.HandleDBError(fmt.Errorf("an error occurred while updating customer credit: %w", err))
 	}

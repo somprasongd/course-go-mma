@@ -11,6 +11,7 @@ import (
 	"go-mma/service"
 	"go-mma/util/logger"
 	"go-mma/util/storage/sqldb"
+	"go-mma/util/storage/sqldb/transactor"
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
@@ -74,13 +75,16 @@ func (s *httpServer) Shutdown() error {
 func (s *httpServer) RegisterRoutes(dbCtx sqldb.DBContext) {
 	v1 := s.app.Group("/api/v1")
 
+	// สร้าง transactor กับ dbCtx จาก transactor
+	transactor, dbtxCtx := transactor.New(dbCtx.DB())
+
 	customers := v1.Group("/customers")
 	{
 		// กำหนด dependency ระหว่างเลเยอร์
-		repo := repository.NewCustomerRepository(dbCtx)
-		svcNoti := service.NewNotificationService() // <-- เพิ่มตรงนี้
+		repo := repository.NewCustomerRepository(dbtxCtx)
+		svcNoti := service.NewNotificationService()
 		// ส่ง instance ของ repository, notiSvc เข้า service
-		svc := service.NewCustomerService(repo, svcNoti) // <-- เพิ่มตรงนี้
+		svc := service.NewCustomerService(transactor, repo, svcNoti)
 		// ส่ง service เข้า handler
 		hdlr := handler.NewCustomerHandler(svc)
 		// Register routes เข้ากับ HTTP server
@@ -89,10 +93,10 @@ func (s *httpServer) RegisterRoutes(dbCtx sqldb.DBContext) {
 
 	orders := v1.Group("/orders")
 	{
-		repoCust := repository.NewCustomerRepository(dbCtx)
-		repoOrder := repository.NewOrderRepository(dbCtx)
+		repoCust := repository.NewCustomerRepository(dbtxCtx)
+		repoOrder := repository.NewOrderRepository(dbtxCtx)
 		svcNoti := service.NewNotificationService()
-		svcOrder := service.NewOrderService(repoCust, repoOrder, svcNoti)
+		svcOrder := service.NewOrderService(transactor, repoCust, repoOrder, svcNoti)
 		hdlr := handler.NewOrderHandler(svcOrder)
 		orders.Post("", hdlr.CreateOrder)
 		orders.Delete("/:orderID", hdlr.CancelOrder)

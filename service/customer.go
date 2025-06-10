@@ -7,6 +7,7 @@ import (
 	"go-mma/repository"
 	"go-mma/util/errs"
 	"go-mma/util/logger"
+	"go-mma/util/storage/sqldb/transactor"
 )
 
 var (
@@ -15,14 +16,16 @@ var (
 )
 
 type CustomerService struct {
-	custRepo *repository.CustomerRepository
-	notiSvc  *NotificationService
+	transactor transactor.Transactor
+	custRepo   *repository.CustomerRepository
+	notiSvc    *NotificationService
 }
 
-func NewCustomerService(custRepo *repository.CustomerRepository, notiSvc *NotificationService) *CustomerService {
+func NewCustomerService(transactor transactor.Transactor, custRepo *repository.CustomerRepository, notiSvc *NotificationService) *CustomerService {
 	return &CustomerService{
-		custRepo: custRepo,
-		notiSvc:  notiSvc,
+		transactor: transactor,
+		custRepo:   custRepo,
+		notiSvc:    notiSvc,
 	}
 }
 
@@ -48,19 +51,29 @@ func (s *CustomerService) CreateCustomer(ctx context.Context, req *dto.CreateCus
 	// แปลง DTO → Model
 	customer := model.NewCustomer(req.Email, req.Credit)
 
-	// ส่งไปที่ Repository Layer เพื่อบันทึกข้อมูลลงฐานข้อมูล
-	if err := s.custRepo.Create(ctx, customer); err != nil {
-		// error logging
-		logger.Log.Error(err.Error())
-		return nil, err
-	}
+	// ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction // <-- ตรงนี้
+	err = s.transactor.WithinTransaction(ctx, func(ctx context.Context) error {
 
-	// ส่งอีเมลต้อนรับ // <-- เพิ่มตรงนี้
-	if err := s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
-		"message": "Thank you for joining us! We are excited to have you as a member.",
-	}); err != nil {
-		// error logging
-		logger.Log.Error(err.Error())
+		// ส่งไปที่ Repository Layer เพื่อบันทึกข้อมูลลงฐานข้อมูล
+		if err := s.custRepo.Create(ctx, customer); err != nil {
+			// error logging
+			logger.Log.Error(err.Error())
+			return err
+		}
+
+		// ส่งอีเมลต้อนรับ // <-- เพิ่มตรงนี้
+		if err := s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
+			"message": "Thank you for joining us! We are excited to have you as a member.",
+		}); err != nil {
+			// error logging
+			logger.Log.Error(err.Error())
+			return err
+		}
+		return nil
+	})
+
+	// จัดการ error จากใน transactor
+	if err != nil {
 		return nil, err
 	}
 
