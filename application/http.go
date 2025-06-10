@@ -8,6 +8,7 @@ import (
 	"go-mma/config"
 	"go-mma/handler"
 	"go-mma/util/logger"
+	"go-mma/util/storage/sqldb"
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
@@ -19,7 +20,7 @@ import (
 type HTTPServer interface {
 	Start()
 	Shutdown() error
-	RegisterRoutes()
+	RegisterRoutes(dbCtx sqldb.DBContext)
 }
 
 type httpServer struct {
@@ -67,12 +68,12 @@ func (s *httpServer) Shutdown() error {
 	return s.app.ShutdownWithContext(ctx)
 }
 
-func (s *httpServer) RegisterRoutes() {
+func (s *httpServer) RegisterRoutes(dbCtx sqldb.DBContext) {
 	v1 := s.app.Group("/api/v1")
 
 	customers := v1.Group("/customers")
 	{
-		hdl := handler.NewCustomerHandler()
+		hdl := handler.NewCustomerHandler(dbCtx)
 		customers.Post("", hdl.CreateCustomer)
 	}
 
