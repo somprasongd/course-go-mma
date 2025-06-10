@@ -1,0 +1,8 @@
+services:
+  db:
+    environment:
+      POSTGRES_DB: go-mma-db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - 5433:5432

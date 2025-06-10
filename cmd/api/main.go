@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -9,6 +9,7 @@ import (
 	"go-mma/application"
 	"go-mma/config"
 	"go-mma/util/logger"
+	"go-mma/util/storage/sqldb"
 )
 
 var (
@@ -25,10 +26,20 @@ func main() {
 
 	config, err := config.Load()
 	if err != nil {
-		log.Panic(err)
+		panic(err.Error())
 	}
 
-	app := application.New(*config)
+	dbCtx, closeDB, err := sqldb.NewDBContext(config.DSN)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer func() { // ใช่ท่า IIFE เพราะต้องการแสดง error ถ้าปิดไม่ได้
+		if err := closeDB(); err != nil {
+			logger.Log.Error(fmt.Sprintf("Error closing database: %v", err))
+		}
+	}()
+
+	app := application.New(*config, dbCtx)
 	app.RegisterRoutes()
 	app.Run()
 

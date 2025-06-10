@@ -1,0 +1,9 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: go-mma-db
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  pg_data:

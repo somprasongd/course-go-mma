@@ -4,6 +4,8 @@ go 1.24.4
 
 require (
 	github.com/gofiber/fiber/v3 v3.0.0-beta.4
+	github.com/jmoiron/sqlx v1.4.0
+	github.com/lib/pq v1.10.9
 	go.elastic.co/ecszap v1.0.3
 	go.uber.org/zap v1.27.0
 )

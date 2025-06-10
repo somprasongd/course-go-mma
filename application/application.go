@@ -4,17 +4,20 @@ import (
 	"fmt"
 	"go-mma/config"
 	"go-mma/util/logger"
+	"go-mma/util/storage/sqldb"
 )
 
 type Application struct {
 	config     config.Config
 	httpServer HTTPServer
+	dbCtx      sqldb.DBContext
 }
 
-func New(config config.Config) *Application {
+func New(config config.Config, dbCtx sqldb.DBContext) *Application {
 	return &Application{
 		config:     config,
 		httpServer: newHTTPServer(config),
+		dbCtx:      dbCtx,
 	}
 }
 

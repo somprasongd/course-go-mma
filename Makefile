@@ -23,3 +23,24 @@ image:
 	-t go-mma:${BUILD_VERSION} \
 	--build-arg VERSION=${BUILD_VERSION} \
 	.
+
+.PHONY: devup
+devup:
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+.PHONY: devdown
+devdown:
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+.PHONY: mgc
+# Example: make mgc filename=create_customer
+mgc:
+	docker run --rm -v $(ROOT_DIR)migrations:/migrations migrate/migrate -verbose create -ext sql -dir /migrations $(filename)
+
+.PHONY: mgu
+mgu:
+	docker run --rm --network host -v $(ROOT_DIR)migrations:/migrations migrate/migrate -verbose -path=/migrations/ -database "$(DB_DSN)" up
+
+.PHONY: mgd
+mgd:
+	docker run --rm --network host -v $(ROOT_DIR)migrations:/migrations migrate/migrate -verbose -path=/migrations/ -database $(DB_DSN) down 1
