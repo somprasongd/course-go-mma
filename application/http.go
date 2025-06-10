@@ -6,9 +6,9 @@ import (
 	"go-mma/application/middleware"
 	"go-mma/build"
 	"go-mma/config"
+	"go-mma/handler"
 	"go-mma/util/logger"
 	"net/http"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -72,10 +72,8 @@ func (s *httpServer) RegisterRoutes() {
 
 	customers := v1.Group("/customers")
 	{
-		customers.Post("", func(c fiber.Ctx) error {
-			time.Sleep(3 * time.Second)
-			return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": 1})
-		})
+		hdl := handler.NewCustomerHandler()
+		customers.Post("", hdl.CreateCustomer)
 	}
 
 	orders := v1.Group("/orders")
