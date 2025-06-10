@@ -1,13 +1,14 @@
 @host = http://localhost:8090
 @base_url = api/v1/orders
-@order_id = o1
+@customer_id = 1749550000580329624
+@order_id = 1749550199489613521
 ### Create Order
 POST {{host}}/{{base_url}} HTTP/1.1
 content-type: application/json
 
 {
-  "customer_id": 1,
-  "order_total": 10
+  "customer_id": {{customer_id}},
+  "order_total": 200
 }
 
 ### Cancel Order

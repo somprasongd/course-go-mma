@@ -58,3 +58,41 @@ func (r *CustomerRepository) ExistsByEmail(ctx context.Context, email string) (b
 	}
 	return true, nil // ถ้าไม่ error แสดงว่ามี email ในระบบแล้ว
 }
+
+func (r *CustomerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
+	query := `
+	SELECT *
+	FROM public.customers
+	WHERE id = $1
+`
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	var customer model.Customer
+	err := r.dbCtx.DB().QueryRowxContext(ctx, query, id).StructScan(&customer)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, errs.HandleDBError(fmt.Errorf("an error occurred while finding a customer by id: %w", err))
+	}
+
+	return &customer, nil
+}
+
+func (r *CustomerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
+	query := `
+	UPDATE public.customers
+	SET credit = $2
+	WHERE id = $1
+	RETURNING *
+`
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	err := r.dbCtx.DB().QueryRowxContext(ctx, query, m.ID, m.Credit).StructScan(m)
+	if err != nil {
+		return errs.HandleDBError(fmt.Errorf("an error occurred while updating customer credit: %w", err))
+	}
+	return nil
+}
