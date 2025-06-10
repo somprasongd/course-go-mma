@@ -7,6 +7,8 @@ import (
 	"go-mma/build"
 	"go-mma/config"
 	"go-mma/handler"
+	"go-mma/repository"
+	"go-mma/service"
 	"go-mma/util/logger"
 	"go-mma/util/storage/sqldb"
 	"net/http"
@@ -73,8 +75,14 @@ func (s *httpServer) RegisterRoutes(dbCtx sqldb.DBContext) {
 
 	customers := v1.Group("/customers")
 	{
-		hdl := handler.NewCustomerHandler(dbCtx)
-		customers.Post("", hdl.CreateCustomer)
+		// กำหนด dependency ระหว่างเลเยอร์
+		repo := repository.NewCustomerRepository(dbCtx)
+		// ส่ง instance ของ repository เข้า service
+		svc := service.NewCustomerService(repo)
+		// ส่ง service เข้า handler
+		hdlr := handler.NewCustomerHandler(svc)
+		// Register routes เข้ากับ HTTP server
+		customers.Post("", hdlr.CreateCustomer)
 	}
 
 	orders := v1.Group("/orders")
