@@ -5,6 +5,6 @@ POST {{host}}/{{base_url}} HTTP/1.1
 content-type: application/json
 
 {
-  "email": "cust8@example.com",
+  "email": "cust7@example.com",
   "credit": 1000
 }

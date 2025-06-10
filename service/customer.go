@@ -51,8 +51,8 @@ func (s *CustomerService) CreateCustomer(ctx context.Context, req *dto.CreateCus
 	// แปลง DTO → Model
 	customer := model.NewCustomer(req.Email, req.Credit)
 
-	// ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction // <-- ตรงนี้
-	err = s.transactor.WithinTransaction(ctx, func(ctx context.Context) error {
+	// ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction
+	err = s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
 
 		// ส่งไปที่ Repository Layer เพื่อบันทึกข้อมูลลงฐานข้อมูล
 		if err := s.custRepo.Create(ctx, customer); err != nil {
@@ -61,14 +61,12 @@ func (s *CustomerService) CreateCustomer(ctx context.Context, req *dto.CreateCus
 			return err
 		}
 
-		// ส่งอีเมลต้อนรับ // <-- เพิ่มตรงนี้
-		if err := s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
-			"message": "Thank you for joining us! We are excited to have you as a member.",
-		}); err != nil {
-			// error logging
-			logger.Log.Error(err.Error())
-			return err
-		}
+		// เพิ่มส่งอีเมลต้อนรับ เข้าไปใน hook แทน การเรียกใช้งานทันที
+		registerPostCommitHook(func(ctx context.Context) error {
+			return s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
+				"message": "Thank you for joining us! We are excited to have you as a member."})
+		})
+
 		return nil
 	})
 

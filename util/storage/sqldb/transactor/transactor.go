@@ -4,12 +4,15 @@ package transactor
 import (
 	"context"
 	"fmt"
+	"go-mma/util/logger"
 
 	"github.com/jmoiron/sqlx"
 )
 
+type PostCommitHook func(ctx context.Context) error
+
 type Transactor interface {
-	WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context) error) error
+	WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error) error
 }
 
 type (
@@ -56,12 +59,18 @@ func WithNestedTransactionStrategy(strategy nestedTransactionsStrategy) Option {
 	}
 }
 
-func (t *sqlTransactor) WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context) error) error {
+func (t *sqlTransactor) WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error) error {
 	currentDB := t.sqlxDBGetter(ctx)
 
 	tx, err := currentDB.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	var hooks []PostCommitHook // <-- เพิ่ม
+
+	registerPostCommitHook := func(hook PostCommitHook) {
+		hooks = append(hooks, hook)
 	}
 
 	newDB, currentTX := t.nestedTransactionsStrategy(currentDB, tx)
@@ -70,13 +79,30 @@ func (t *sqlTransactor) WithinTransaction(ctx context.Context, txFunc func(ctxWi
 	}()
 	ctxWithTx := txToContext(ctx, newDB)
 
-	if err := txFunc(ctxWithTx); err != nil {
+	if err := txFunc(ctxWithTx, registerPostCommitHook); err != nil {
 		return err
 	}
 
 	if err := currentTX.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
+	// หลังจาก commit แล้ว รัน hook แบบ isolated
+	go func() {
+		for _, hook := range hooks {
+			func(h PostCommitHook) {
+				defer func() {
+					if r := recover(); r != nil {
+						// Log panic ที่เกิดใน hook
+						logger.Log.Error(fmt.Sprintf("post-commit hook panic: %v", r))
+					}
+				}()
+				if err := h(ctx); err != nil {
+					logger.Log.Error(fmt.Sprintf("post-commit hook error: %v", err))
+				}
+			}(hook)
+		}
+	}()
 
 	return nil
 }

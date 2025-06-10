@@ -56,7 +56,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequ
 
 	// ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction
 	var order *model.Order
-	err = s.transactor.WithinTransaction(ctx, func(ctx context.Context) error {
+	err = s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
 		// ตัดยอด credit ในตาราง customer
 		if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
 			logger.Log.Error(err.Error())
@@ -73,14 +73,12 @@ func (s *OrderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequ
 		}
 
 		// ส่งอีเมลยืนยัน
-		err = s.notiSvc.SendEmail(customer.Email, "Order Created", map[string]any{
-			"order_id": order.ID,
-			"total":    order.OrderTotal,
+		registerPostCommitHook(func(ctx context.Context) error {
+			return s.notiSvc.SendEmail(customer.Email, "Order Created", map[string]any{
+				"order_id": order.ID,
+				"total":    order.OrderTotal,
+			})
 		})
-		if err != nil {
-			logger.Log.Error(err.Error())
-			return err
-		}
 
 		return nil
 	})
