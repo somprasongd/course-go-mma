@@ -2,16 +2,16 @@ package service
 
 import (
 	"context"
-	"errors"
 	"go-mma/dto"
 	"go-mma/model"
 	"go-mma/repository"
+	"go-mma/util/errs"
 	"go-mma/util/logger"
 )
 
 var (
-	ErrCreditValue = errors.New("credit must be greater than 0")
-	ErrEmailExists = errors.New("email already exists")
+	ErrCreditValue = errs.BusinessRuleError("credit must be greater than 0")
+	ErrEmailExists = errs.ConflictError("email already exists")
 )
 
 type CustomerService struct {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go-mma/dto"
 	"go-mma/service"
+	"go-mma/util/errs"
 	"go-mma/util/logger"
 
 	"github.com/gofiber/fiber/v3"
@@ -24,14 +25,20 @@ func (h *CustomerHandler) CreateCustomer(c fiber.Ctx) error {
 	var req dto.CreateCustomerRequest
 	if err := c.Bind().Body(&req); err != nil {
 		// แปลงไม่ได้ให้ส่ง error 400
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		errResp := errs.InputValidationError(err.Error()) // <-- ปรับมาเป็น AppError
+		return c.Status(
+			errs.GetHTTPStatus(errResp), // <-- ดึง status code จาก AppError
+		).JSON(errResp)
 	}
 
 	logger.Log.Info(fmt.Sprintf("Received customer: %v", req))
 
 	// ตรวจสอบ input fields (e.g., value, format, etc.)
 	if err := req.Validate(); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		errResp := errs.InputValidationError(err.Error()) // <-- ปรับมาเป็น AppError
+		return c.Status(
+			errs.GetHTTPStatus(errResp), // <-- ดึง status code จาก AppError
+		).JSON(errResp)
 	}
 
 	// ส่งไปที่ Service Layer
@@ -39,7 +46,9 @@ func (h *CustomerHandler) CreateCustomer(c fiber.Ctx) error {
 
 	// จัดการ error จาก Service Layer หากเกิดขึ้น
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(
+			errs.GetHTTPStatus(err), // <-- ดึง status code จาก AppError
+		).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// ตอบกลับด้วย status code 201 (created) และข้อมูลแบบ JSON

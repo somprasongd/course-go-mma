@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"go-mma/model"
+	"go-mma/util/errs"
 	"go-mma/util/storage/sqldb"
 	"time"
 )
@@ -34,7 +35,7 @@ func (r *CustomerRepository) Create(ctx context.Context, customer *model.Custome
 		QueryRowxContext(ctx, query, customer.ID, customer.Email, customer.Credit).
 		StructScan(customer) // นำค่า created_at, updated_at ใส่ใน struct customer
 	if err != nil {
-		return fmt.Errorf("an error occurred while inserting customer: %w", err)
+		return errs.HandleDBError(fmt.Errorf("an error occurred while inserting customer: %w", err))
 	}
 	return nil
 }
@@ -53,7 +54,7 @@ func (r *CustomerRepository) ExistsByEmail(ctx context.Context, email string) (b
 		if err == sql.ErrNoRows { // หาไม่เจอแสดงว่ายังไม่มี email ในระบบแล้ว
 			return false, nil
 		}
-		return false, fmt.Errorf("an error occurred while checking email: %w", err)
+		return false, errs.HandleDBError(fmt.Errorf("an error occurred while checking email: %w", err))
 	}
 	return true, nil // ถ้าไม่ error แสดงว่ามี email ในระบบแล้ว
 }
