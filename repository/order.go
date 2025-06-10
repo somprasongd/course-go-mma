@@ -10,17 +10,25 @@ import (
 	"time"
 )
 
-type OrderRepository struct {
+// --> Step 1: สร้าง interface
+type OrderRepository interface {
+	Create(ctx context.Context, order *model.Order) error
+	FindByID(ctx context.Context, id int64) (*model.Order, error)
+	Cancel(ctx context.Context, id int64) error
+}
+
+type orderRepository struct { // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 	dbCtx transactor.DBTXContext
 }
 
-func NewOrderRepository(dbCtx transactor.DBTXContext) *OrderRepository {
-	return &OrderRepository{
+// --> Step 3: return เป็น interface
+func NewOrderRepository(dbCtx transactor.DBTXContext) OrderRepository {
+	return &orderRepository{ // --> Step 4: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 		dbCtx: dbCtx,
 	}
 }
 
-func (r *OrderRepository) Create(ctx context.Context, m *model.Order) error {
+func (r *orderRepository) Create(ctx context.Context, m *model.Order) error {
 	query := `
 	INSERT INTO public.orders (
 			id, customer_id, order_total
@@ -39,7 +47,7 @@ func (r *OrderRepository) Create(ctx context.Context, m *model.Order) error {
 	return nil
 }
 
-func (r *OrderRepository) FindByID(ctx context.Context, id int64) (*model.Order, error) {
+func (r *orderRepository) FindByID(ctx context.Context, id int64) (*model.Order, error) {
 	query := `
 	SELECT *
 	FROM public.orders
@@ -60,7 +68,7 @@ func (r *OrderRepository) FindByID(ctx context.Context, id int64) (*model.Order,
 	return &order, nil
 }
 
-func (r *OrderRepository) Cancel(ctx context.Context, id int64) error {
+func (r *orderRepository) Cancel(ctx context.Context, id int64) error {
 	query := `
 	UPDATE public.orders
 	SET canceled_at = current_timestamp -- soft delete record

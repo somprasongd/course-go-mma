@@ -10,17 +10,26 @@ import (
 	"time"
 )
 
-type CustomerRepository struct {
-	dbCtx transactor.DBTXContext // ใช้งาน database ผ่าน transactor.DBContext interface
+// --> Step 1: สร้าง interface
+type CustomerRepository interface {
+	Create(ctx context.Context, customer *model.Customer) error
+	ExistsByEmail(ctx context.Context, email string) (bool, error)
+	FindByID(ctx context.Context, id int64) (*model.Customer, error)
+	UpdateCredit(ctx context.Context, customer *model.Customer) error
 }
 
-func NewCustomerRepository(dbCtx transactor.DBTXContext) *CustomerRepository {
-	return &CustomerRepository{
+type customerRepository struct { // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+	dbCtx transactor.DBTXContext
+}
+
+// --> Step 3: return เป็น interface
+func NewCustomerRepository(dbCtx transactor.DBTXContext) CustomerRepository {
+	return &customerRepository{ // --> Step 4: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 		dbCtx: dbCtx,
 	}
 }
 
-func (r *CustomerRepository) Create(ctx context.Context, customer *model.Customer) error {
+func (r *customerRepository) Create(ctx context.Context, customer *model.Customer) error {
 	query := `
 	INSERT INTO public.customers (id, email, credit)
 	VALUES ($1, $2, $3)
@@ -40,7 +49,7 @@ func (r *CustomerRepository) Create(ctx context.Context, customer *model.Custome
 	return nil
 }
 
-func (r *CustomerRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+func (r *customerRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	query := `SELECT 1 FROM public.customers WHERE email = $1 LIMIT 1`
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -59,7 +68,7 @@ func (r *CustomerRepository) ExistsByEmail(ctx context.Context, email string) (b
 	return true, nil // ถ้าไม่ error แสดงว่ามี email ในระบบแล้ว
 }
 
-func (r *CustomerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
+func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
 	query := `
 	SELECT *
 	FROM public.customers
@@ -80,7 +89,7 @@ func (r *CustomerRepository) FindByID(ctx context.Context, id int64) (*model.Cus
 	return &customer, nil
 }
 
-func (r *CustomerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
+func (r *customerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
 	query := `
 	UPDATE public.customers
 	SET credit = $2

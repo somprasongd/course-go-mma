@@ -11,10 +11,11 @@ import (
 )
 
 type CustomerHandler struct {
-	custService *service.CustomerService
+	custService service.CustomerService // <-- Step1: เปลี่ยนจาก pointer เป็น interface
 }
 
-func NewCustomerHandler(custService *service.CustomerService) *CustomerHandler {
+func NewCustomerHandler(custService service.CustomerService, // <-- Step2: เปลี่ยนจาก pointer เป็น interface
+) *CustomerHandler {
 	return &CustomerHandler{
 		custService: custService,
 	}

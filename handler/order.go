@@ -12,10 +12,11 @@ import (
 )
 
 type OrderHandler struct {
-	orderSvc *service.OrderService
+	orderSvc service.OrderService // <-- Step1: เปลี่ยนจาก pointer เป็น interface
 }
 
-func NewOrderHandler(orderSvc *service.OrderService) *OrderHandler {
+func NewOrderHandler(orderSvc service.OrderService, // <-- Step1: เปลี่ยนจาก pointer เป็น interface
+) *OrderHandler {
 	return &OrderHandler{orderSvc: orderSvc}
 }
 
