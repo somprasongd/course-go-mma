@@ -14,7 +14,19 @@
 - เริ่มต้นด้วย Layered Architecture ที่เข้าใจง่าย
 - ออกแบบระบบจัดการ Error ให้ตรวจสอบและแก้ไขง่าย
 - สร้างระบบส่งอีเมลแบบ Reusable ด้วย Notification Service
-- สร้างระบบจัดการออเดอร์ ด้วย Layered Architecture
+- สร้างระบบจัดการออเดอร์ด้วย Layered Architecture
+- ใช้งาน Database Transaction อย่างไรให้ถูกต้อง
+- ทำความเข้าใจ Unit of Work และนำมาใช้จริง
+- นำหลักการ Dependency Inversion มาใช้ในระบบจริง
+- แปลงโครงสร้างไปสู่ Modular Architecture อย่างเป็นขั้นตอน
+- แยกความรับผิดชอบด้วยการซ่อนรายละเอียดของ Subdomain
+- ป้องกันการเข้าถึงข้ามโมดูลด้วยโฟลเดอร์ `internal`
+- จัดการ Service ใน Monolith ด้วย Service Registry
+- รวมโค้ดทั้งหมดไว้ใน Mono-Repository อย่างเป็นระบบ
+- กำหนด Public API Contract ระหว่างโมดูล
+- การแยกข้อมูลระหว่างโมดูล (Data Isolation)
+- การจัดการโมดูล ด้วย Feature-Based Structure + CQRS
+- เพิ่มความยืดหยุ่นด้วยแนวคิด Event-Driven Architecture
 
 ---
 
@@ -1248,7 +1260,7 @@ Handler.customer --> Database: ตรวจสอบ email ซ้ำ?
      // แปลง request body -> dto
      var req CreateCustomerRequest
      if err := c.Bind().Body(&req); err != nil {
-      // แปลงไม่ได้ให้ส่ง error 400
+      // แปลงไม่ได้ แสดงว่าตรวจสอบโครงสร้างไม่ผ่าน ให้ส่ง error 400
       return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
      }
     
@@ -1261,14 +1273,12 @@ Handler.customer --> Database: ตรวจสอบ email ซ้ำ?
      if _, err := mail.ParseAddress(req.Email); err != nil {
       return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is invalid"})
      }
-    
-     // ตรวจสอบเงื่อนไขของ business rules
-     // Rule 1: credit ต้องมากกว่า 0
      if req.Credit <= 0 {
-      return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "credit must be greater than 0"})
+      return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "credit must be greater than 0"})
      }
     
-     // TODO: Rule 2: ตรวจสอบ email ต้องไม่ซ้ำ
+     // ตรวจสอบความถูกต้องตาม "กฎทางธุรกิจ" (Business Logic/Semantic Validation)
+     // TODO: ตรวจสอบ email ต้องไม่ซ้ำในฐานข้อมูล
      // if exists {
      //  return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "email already exists"})
      // }
@@ -1356,7 +1366,7 @@ Handler.order --> Database: ตรวจสอบ orderID
      // แปลง request body -> dto
      var req CreateOrderRequest
      if err := c.Bind().Body(&req); err != nil {
-      // แปลงไม่ได้ให้ส่ง error 400
+      // แปลงไม่ได้ แสดงว่าตรวจสอบโครงสร้างไม่ผ่าน ให้ส่ง error 400
       return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
      }
     
@@ -1366,18 +1376,17 @@ Handler.order --> Database: ตรวจสอบ orderID
      if req.CustomerID == "" {
       return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "customer_id is required"})
      }
-    
-     // ตรวจสอบ business rules (e.g., order_total must be greater than 0)
      if req.OrderTotal <= 0 {
       return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "order_total must be greater than 0"})
      }
     
+      // ตรวจสอบความถูกต้องตาม "กฎทางธุรกิจ" (Business Logic/Semantic Validation)
      // TODO: ตรวจสอบว่ามี customer id อยู่ในฐานข้อมูล หรือไม่
      // customer := getCustomer(order.CustomerID)
      // if customer == nil {
      //  return return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "the customer with given id was not found"})
      // }
-    
+     
      // TODO: ตรวจสอบ credit เพียงพอ หรือไม่
      // if credit < payload.OrderTotal {
      //  return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "insufficient credit"})
@@ -1401,7 +1410,7 @@ Handler.order --> Database: ตรวจสอบ orderID
     }
     
     func (h *OrderHandler) CancelOrder(c fiber.Ctx) error {
-     // ตรวจสอบรูปแบบ orderID
+     // ตรวจสอบ input: ประเภทข้อมูลของ orderID
      orderID, err := strconv.Atoi(c.Params("orderID"))
      if err != nil {
       // ถ้าไม่ถูกต้อง error 400
@@ -1410,6 +1419,7 @@ Handler.order --> Database: ตรวจสอบ orderID
     
      logger.Log.Info(fmt.Sprintf("Cancelling order: %v", orderID))
     
+      // ตรวจสอบความถูกต้องตาม "กฎทางธุรกิจ" (Business Logic/Semantic Validation)
      // TODO: ตรวจสอบ orderID ในฐานข้อมูล
      // order := getOrder(orderID)
      // if order == nil {
@@ -1920,10 +1930,8 @@ Handler.order --> Database: ตรวจสอบ orderID
      // กำหนด payload structure (DTO: Request)
      // แปลง request body -> dto
      // ตรวจสอบ input fields (e.g., value, format, etc.)
-     // ตรวจสอบเงื่อนไขของ business rules
-     // Rule 1: credit ต้องมากกว่า 0
-    
-     // Rule 2: ตรวจสอบ email ต้องไม่ซ้ำ
+     // ตรวจสอบความถูกต้องตาม "กฎทางธุรกิจ" (Business Logic/Semantic Validation)
+     // Rule: email ต้องไม่ซ้ำในฐานข้อมูล
      query := "SELECT 1 FROM public.customers where email = $1 LIMIT 1"
      ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
      defer cancel()
@@ -2034,7 +2042,7 @@ project/
     <aside>
     💡
 
-    ในบทความนี้จะสร้างเป็น [Rich Model](https://somprasongd.work/blog/architecture/anemic-vs-rich-model-ddd)
+    สร้าง Model แบบ [Rich Model](https://somprasongd.work/blog/architecture/anemic-vs-rich-model-ddd)
 
     </aside>
 
@@ -2116,13 +2124,13 @@ project/
 หน้าที่หลักของ Service Layer คือ รวมและควบคุม Business Logic ของแอปพลิเคชันไว้ในที่เดียว ดังนี้
 
 - **รับ DTO**: รับ DTO จาก Handler เข้ามาเพื่อประมวลผล
-- **ตรวจสอบ**: ตรวจสอบความถูกต้องตาม business logic rule
+- **ตรวจสอบ**: ตรวจสอบความถูกต้องตาม **"กฎทางธุรกิจ"** (Business Logic/Semantic Validation) ซึ่งมักจะต้องมีการประมวลผลหรือตรวจสอบกับข้อมูลส่วนอื่นๆ ในระบบ เช่น การตรวจสอบข้อมูลซ้ำในฐานข้อมูล
 - **แปลงข้อมูล**: แปลง DTO → Model
 - **เรียก Repository**: เพื่อทำ CRUD (Create, Read, Update, Delete) ตามเงื่อนไข
 - **ส่งผลลัพธ์**: รับผลลัพธ์จาก Repository แล้วแปลงกลับเป็น DTO Response
 - **จัดการ error**: แสดง error log แล้วส่งกลับไปให้ Controller (หรือ Handler) จัดการต่อ
 
-ขั้นตอนการสร้าง Service Layer
+**ขั้นตอนการสร้าง Service Layer**
 
 - สร้าง DTO (Data Transfer Object) ไว้เป็นตัวกลางสำหรับรับ–ส่งข้อมูล ระหว่างชั้น Handler ↔ Service
 
@@ -2168,7 +2176,6 @@ project/
     )
     
     var (
-     ErrCreditValue = errors.New("credit must be greater than 0")
      ErrEmailExists = errors.New("email already exists")
     )
     
@@ -2183,13 +2190,8 @@ project/
     }
     
     func (s *CustomerService) CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error) {
-     // ตรวจสอบเงื่อนไขของ business rules
-     // Rule 1: credit ต้องมากกว่า 0
-     if req.Credit <= 0 {
-      return nil, ErrCreditValue
-     }
-    
-     // Rule 2: ตรวจสอบ email ต้องไม่ซ้ำ
+     // ตรวจสอบความถูกต้องตาม "กฎทางธุรกิจ" (Business Logic/Semantic Validation)
+     // Rule: email ต้องไม่ซ้ำในฐานข้อมูล
      exists, err := s.custRepo.ExistsByEmail(ctx, req.Email)
      if err != nil {
       // error logging
@@ -2224,14 +2226,14 @@ project/
 
 หน้าที่หลักของ Presentation Layer (หรือ HTTP Handler)
 
-- รับคำขอ: รับ HTTP Request จาก Client
-- แปลงข้อมูล: แปลง JSON → DTO (ใช้ `BodyParser`, `Bind`, หรือ Unmarshal)
-- ตรวจสอบ: ตรวจสอบความถูกต้องของข้อมูล (validation)
-- เรียก Service: ส่ง DTO เข้า Service Layer เพื่อประมวลผล
-- ส่งผลลัพธ์: รับผลลัพธ์จาก Service แล้วแปลงกลับเป็น JSON Response
-- จัดการ error: แปลง error จากชั้นล่างเป็น HTTP response code เช่น 400, 500
+- **รับคำขอ:** รับ HTTP Request จาก Client
+- **แปลงข้อมูล:** แปลง JSON → DTO (ใช้ `BodyParser`, `Bind`, หรือ Unmarshal)
+- **ตรวจสอบ:** ตรวจสอบความถูกต้องของ **"รูปแบบ"** และ **"โครงสร้าง"** ของข้อมูลที่ส่งเข้ามา (Input/Syntax Validation) เช่น ค่าว่าง, รูปแบบอีเมล, หรือประเภทข้อมูลที่ถูกต้อง
+- **เรียก Service:** ส่ง DTO เข้า Service Layer เพื่อประมวลผล
+- **ส่งผลลัพธ์:** รับผลลัพธ์จาก Service แล้วแปลงกลับเป็น JSON Response ส่งกลับไปให้ client
+- **จัดการ error**: แปลง error จาก Service ให้เป็น HTTP response code เช่น `400`, `500`
 
-ขั้นตอนการสร้าง Presentation Layer (HTTP Handlers)
+**ขั้นตอนการสร้าง Presentation Layer (HTTP Handlers)**
 
 - แก้ไขไฟล์ `dto/customer_request.go` เพื่อเพิ่ม validation เช่น credit ต้อง ≥ 0 ก่อนส่งให้ Service
 
@@ -2355,12 +2357,13 @@ func (s *httpServer) RegisterRoutes(db sqldb.DBContext) {
 
 | ประเภท | สถานะ | ใช้เมื่อ | หมายเหตุ |
 | --- | --- | --- | --- |
-| Input Validation | 400 Bad Request | ข้อมูลไม่ครบ, รูปแบบผิด | ตรวจจับได้ที่ Handler / DTO |
+| Input Validation | 400 Bad Request | ข้อมูลไม่ครบ, รูปแบบผิด | เกิดจาก **Client-Side**
+ตรวจจับได้ที่ Handler / DTO |
 | Authorization | 401 Unauthorized | ยังไม่ login / token ผิด | ตรวจจับได้ที่ Middleware |
 |  | 403 Forbidden | login แล้ว แต่ไม่มีสิทธิ์ | ตรวจจับได้ที่ Middleware |
-| Business Rule | 404 Not Found | ไม่พบข้อมูล | ตรวจจับได้ที่ Service |
+| Business Logic | 404 Not Found | ไม่พบข้อมูล | ตรวจจับได้ที่ Service |
 |  | 409 Conflict | ข้อมูลซ้ำกัน, ขัดแย้ง เช่น email ซ้ำ, order ถูก cancel ไปแล้ว | ตรวจจับได้ที่ Service |
-|  | 422 Unprocessable Entity |  ข้อมูลมีรูปแบบถูก แต่ logic ผิด เช่น เครดิตไม่พอ, วันที่ย้อนหลัง | ตรวจจับได้ที่ Service |
+|  | 422 Unprocessable Entity | ข้อมูลมีรูปแบบถูก แต่ logic ผิด เช่น เครดิตไม่พอ, วันที่ย้อนหลัง | ตรวจจับได้ที่ Service |
 | Database | 500 Internal Server Error | เกิด database connection error | ตรวจจับได้ที่ Repository |
 | Exception | 500 Internal Server Error | เกิด exception หรือ panic ใน server code | เกิดได้ทุกที่ |
 
@@ -2472,9 +2475,9 @@ func (s *httpServer) RegisterRoutes(db sqldb.DBContext) {
 
 ในชั้นของ repository เมื่อเชื่อมต่อกับฐานข้อมูล PostgreSQL จะเกิด error ได้ ดังนี้
 
-- 23502: Not null violation → **ErrConflict**
+- 23502: Not null violation → **ErrDataIntegrity**
 - 23503: Foreign key violation → **ErrDataIntegrity**
-- 23505: Unique constraint violation → **ErrDataIntegrity**
+- 23505: Unique constraint violation → **ErrConflict**
 - อื่นๆ → **ErrDatabaseFailure**
 
 ขั้นตอนการ implement
@@ -2538,11 +2541,10 @@ Service layer จะเป็นจุดที่ตัดสินใจว่
 
 แต่ถ้าเป็น error ที่ได้มาจาก repository layer เราจะคืนกลับ error นั้นๆ ได้เลย เพราะถูกจัดการมาแล้ว
 
-ในไฟล์ `service/customer.go` มีแค่ error การตรวจ business rules เท่านั้น
+ในไฟล์ `service/customer.go` มีแค่ error การตรวจ business logic ห้ามอีเมลซ้ำเท่านั้น
 
 ```go
 var (
- ErrCreditValue = errs.BusinessRuleError("credit must be greater than 0")
  ErrEmailExists = errs.ConflictError("email already exists")
 )
 ```
@@ -2571,7 +2573,7 @@ var (
     
      // ตรวจสอบ input fields (e.g., value, format, etc.)
      if err := req.Validate(); err != nil {
-      errResp := errs.InputValidationError(err.Error()) / <-- ปรับมาเป็น AppError
+      errResp := errs.InputValidationError(err.Error()) // <-- ปรับมาเป็น AppError
       return c.Status(fiber.StatusBadRequest).JSON(errResp)
      }
     
@@ -2877,11 +2879,12 @@ var (
     }
     
     func (s *CustomerService) CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error) {
-     // Business Logic Rule: ตรวจสอบ email ซ้ำ
+     // Rule: email ต้องไม่ซ้ำในฐานข้อมูล
      // แปลง DTO → Model
      // ส่งไปที่ Repository Layer เพื่อบันทึกข้อมูลลงฐานข้อมูล
     
-     // ส่งอีเมลต้อนรับ // <-- เพิ่มตรงนี้
+      // <-- เพิ่มตรงนี้
+     // ส่งอีเมลต้อนรับ 
      if err := s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
       "message": "Thank you for joining us! We are excited to have you as a member.",
      }); err != nil {
@@ -2925,9 +2928,10 @@ var (
 
 ### Repository Layer
 
-- สร้างโมเดล
+- สร้างโมเดล `Order` เพื่อกำหนดโครงสร้างของออเดอร์ และฟังก์ชันสำหรับสร้างออเดอร์ใหม่
 
-    สร้างไฟล์ `model/order.go` เพื่อกำหนดโครงสร้างของออเดอร์ และฟังก์ชันสำหรับสร้างออเดอร์ใหม่
+    > สร้างไฟล์ `model/order.go`
+    >
 
     ```go
     package model
@@ -2954,7 +2958,10 @@ var (
     }
     ```
 
-    สำหรับโมเดล `Customer` ในไฟล์ `model/customer.go` ให้เพิ่มเมธอดเพื่อจัดการ credit ได้แก่ ตัดยอด (`ReserveCredit`) และคืนยอด (`ReleaseCredit`) โดยใช้แนวทางของ ([Rich Model](https://somprasongd.work/blog/architecture/anemic-vs-rich-model))
+- สำหรับโมเดล `Customer` ให้เพิ่มฟังก์ชันเพื่อจัดการ credit ได้แก่ ตัดยอด (`ReserveCredit`) และคืนยอด (`ReleaseCredit`) โดยใช้แนวทางของ ([Rich Model](https://somprasongd.work/blog/architecture/anemic-vs-rich-model))
+
+    > แก้ไขไฟล์ `model/customer.go`
+    >
 
     ```go
     func (c *Customer) ReserveCredit(v int) error {
@@ -2974,9 +2981,10 @@ var (
     }
     ```
 
-- สร้าง Repository
+- สร้าง `OrderRepository` สำหรับจัดการกับคำสั่ง SQL ที่เกี่ยวข้องกับออเดอร์ เช่น การสร้าง ค้นหา และยกเลิกออเดอร์
 
-    สร้างไฟล์ `repository/order.go` สำหรับจัดการกับคำสั่ง SQL ที่เกี่ยวข้องกับออเดอร์ เช่น การสร้าง ค้นหา และยกเลิกออเดอร์
+    > สร้างไฟล์ `repository/order.go`
+    >
 
     ```go
     package repository
@@ -3057,7 +3065,10 @@ var (
     }
     ```
 
-    ในไฟล์ `repository/customer.go` ให้เพิ่มฟังก์ชัน `FindByID` และ `UpdateCredit` เพื่อค้นหาข้อมูลลูกค้าและอัปเดตยอดเครดิต
+- สำหรับ `CustomerRepository` ให้เพิ่มฟังก์ชัน `FindByID` และ `UpdateCredit` เพื่อค้นหาข้อมูลลูกค้าและอัปเดตยอดเครดิต
+
+    > แก้ไขไฟล์ `repository/customer.go`
+    >
 
     ```go
     func (r *CustomerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
@@ -3101,9 +3112,10 @@ var (
 
 ### Service Layer
 
-- สร้าง DTO สำหรับไว้ รับ-ส่งข้อมูลระหว่าง Handler ↔ Service
+- สร้าง DTO สำหรับรับข้อมูลการสร้างออเดอร์จากฝั่งผู้ใช้งาน และเพิ่มฟังก์ชัน `Validate` สำหรับตรวจสอบความถูกต้องของข้อมูล
 
-    สร้างไฟล์ `dto/order_request.go` สำหรับรับข้อมูลการสร้างออเดอร์จากฝั่งผู้ใช้งาน และเพิ่มฟังก์ชัน `Validate` สำหรับตรวจสอบความถูกต้องของข้อมูล
+    > สร้างไฟล์ `dto/order_request.go`
+    >
 
     ```go
     package dto
@@ -3119,11 +3131,17 @@ var (
      if r.CustomerID <= 0 {
       return fmt.Errorf("customer_id is required")
      }
+     if r.OrderTotal <= 0 {
+      return fmt.Errorf("order_total must be greater than 0")
+     }
      return nil
     }
     ```
 
-    สร้างไฟล์ `dto/order_response.go` สำหรับสร้าง response ที่จะส่งกลับไปยังผู้ใช้งานหลังจากสร้างออเดอร์สำเร็จ
+- สร้าง DTO สำหรับสร้าง response ที่จะส่งกลับไปยังผู้ใช้งานหลังจากสร้างออเดอร์สำเร็จใช้งาน
+
+    > สร้างไฟล์ `dto/order_response.go`
+    >
 
     ```go
     package dto
@@ -3137,16 +3155,16 @@ var (
     }
     ```
 
-- สร้าง Service
-
-    สร้างไฟล์ `service/order.go` เพื่อรวม business logic สำหรับการสร้างและยกเลิกออเดอร์ โดยมีขั้นตอนสำคัญดังนี้
-
-  - ตรวจสอบยอดรวมต้องมากกว่า 0
+- สร้าง `OrderService` เพื่อรวม business logic สำหรับการสร้างและยกเลิกออเดอร์ โดยมีขั้นตอนสำคัญดังนี้
   - ตรวจสอบว่าลูกค้ามีอยู่จริง
-  - ตรวจสอบ credit และตัดยอด
-  - บันทึกออเดอร์
+  - ตรวจสอบ credit เพียงพอหรือไม่ เพื่อตัดยอด
+  - บันทึกการแก้ไขยอดเครดิตลงฐานข้อมูล
+  - บันทึกรายออเดอร์ใหม่ลงฐานข้อมูล
   - ส่งอีเมลแจ้งเตือน
-  - หากยกเลิกออเดอร์ ให้ทำการคืนยอดเครดิตให้ลูกค้า และบันทึกลงฐานข้อมูล
+  - หากยกเลิกออเดอร์ ให้ทำการคืนยอดเครดิตให้ลูกค้า และบันทึกการแก้ไขลงฐานข้อมูล
+
+    > สร้างไฟล์ `service/order.go`
+    >
 
     ```go
     package service
@@ -3161,7 +3179,6 @@ var (
     )
     
     var (
-     ErrTotalOrderValue = errs.BusinessRuleError("order_total must be greater than 0")
      ErrNoCustomerID    = errs.ResourceNotFoundError("the customer with given id was not found")
      ErrNoOrderID       = errs.ResourceNotFoundError("the order with given id was not found")
     )
@@ -3181,12 +3198,8 @@ var (
     }
     
     func (s *OrderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error) {
-     // Business Logic Rule: ตรวจสอบ ยอดรวมต้องมากกว่า 0
-     if req.OrderTotal <= 0 {
-      return nil, ErrTotalOrderValue
-     }
-    
-     // Business Logic Rule: ตรวจสอบ customer id
+     // ตรวจสอบความถูกต้องตาม "กฎทางธุรกิจ" (Business Logic/Semantic Validation)
+     // Business Logic: ตรวจสอบ customer id ในฐานข้อมูล
      customer, err := s.custRepo.FindByID(ctx, req.CustomerID)
      if err != nil {
       logger.Log.Error(err.Error())
@@ -3197,12 +3210,12 @@ var (
       return nil, ErrNoCustomerID
      }
     
-     // Business Logic Rule: ตัดยอด credit ถ้าไม่พอให้ error
+     // Business Logic: ตัดยอด credit ถ้าไม่พอให้ error
      if err := customer.ReserveCredit(req.OrderTotal); err != nil {
       return nil, err
      }
     
-     // ตัดยอด credit ในตาราง customer
+     // บันทึกการตัดยอด credit ในตาราง customer
      if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
       logger.Log.Error(err.Error())
       return nil, err
@@ -3210,7 +3223,8 @@ var (
     
      // สร้าง order ใหม่ DTO -> Model
      order := model.NewOrder(req.CustomerID, req.OrderTotal)
-     // บันทึกลงฐานข้อมูล
+     
+     // บันทึกรายออเดอร์ใหม่ลงฐานข้อมูล
      err = s.orderRepo.Create(ctx, order)
      if err != nil {
       logger.Log.Error(err.Error())
@@ -3233,7 +3247,7 @@ var (
     }
     
     func (s *OrderService) CancelOrder(ctx context.Context, id int64) error {
-     // Business Logic Rule: ตรวจสอบ order id
+     // Business Logic: ตรวจสอบ order id ในฐานข้อมูล
      order, err := s.orderRepo.FindByID(ctx, id)
      if err != nil {
       logger.Log.Error(err.Error())
@@ -3250,7 +3264,7 @@ var (
       return err
      }
     
-     // Business Logic Rule: ตรวจสอบ customer id
+     // Business Logic: ตรวจสอบ customer id
      customer, err := s.custRepo.FindByID(ctx, order.CustomerID)
      if err != nil {
       logger.Log.Error(err.Error())
@@ -3358,22 +3372,2337 @@ var (
 
 - แก้ไขไฟล์ `application/http.go`
 
-  ```go
-  func (s *httpServer) RegisterRoutes(db sqldb.DBContext) {
-  v1 := s.app.Group("/api/v1")
+    ```go
+    func (s *httpServer) RegisterRoutes(db sqldb.DBContext) {
+     v1 := s.app.Group("/api/v1")
+    
+     // customers
+    
+     orders := v1.Group("/orders")
+     {
+      repoCust := repository.NewCustomerRepository(dbCtx)
+      repoOrder := repository.NewOrderRepository(dbCtx)
+      svcNoti := service.NewNotificationService()
+      svcOrder := service.NewOrderService(repoCust, repoOrder, svcNoti)
+      hdlr := handler.NewOrderHandler(svcOrder)
+      orders.Post("", hdlr.CreateOrder)
+      orders.Delete("/:orderID", hdlr.CancelOrder)
+     }
+    }
+    ```
 
-  // customers
+## ใช้งาน Database Transaction อย่างไรให้ถูกต้อง
 
-  orders := v1.Group("/orders")
-  {
-    repoCust := repository.NewCustomerRepository(dbCtx)
-    repoOrder := repository.NewOrderRepository(dbCtx)
-    svcNoti := service.NewNotificationService()
-    svcOrder := service.NewOrderService(repoCust, repoOrder, svcNoti)
-    hdlr := handler.NewOrderHandler(svcOrder)
-    orders.Post("", hdlr.CreateOrder)
-    orders.Delete("/:orderID", hdlr.CancelOrder)
+ในตัวอย่างโค้ดล่าสุด การสร้างออเดอร์ใหม่มีการเรียกใช้งาน repository หลายครั้ง เช่น
+
+1. หักเครดิตจากลูกค้า
+2. บันทึกคำสั่งซื้อ (order)
+
+หากคำสั่งแรกสำเร็จ แต่คำสั่งที่สองล้มเหลว ข้อมูลในระบบจะไม่สมบูรณ์และอาจก่อให้เกิดปัญหาตามมา เช่น เครดิตถูกหักไปแล้วแต่ไม่มีคำสั่งซื้อเกิดขึ้น
+
+```go
++------------------+        +-------------------+        +------------------+
+| OrderService     |        | CustomerRepo      |        | OrderRepo        |
+|------------------|        |-------------------|        |------------------|
+| CreateOrder()    |        | FindCustomerByID()|        | SaveOrder()      |
+|                  |        | ReserveCredit()   |        |                  |
++--------+---------+        +--------+----------+        +--------+---------+
+         |                           |                            |
+         | Find Customer By ID       |                            |
+         +-------------------------> |                            |
+         |                           |                            |
+         |     Reserve Credit        |                            |
+         +-------------------------> |                            |
+         |                           |                            |
+         |   Save Order              |                            |
+         +------------------------------------------------------->|
+         |                           |                            |
+         |   ❌ FAIL (DB Error)      |                            |
+         |<-------------------------------------------------------+
+         |                           |                            |
+         |                           |                            |
+         |                           |                            |
+         |                           |      ⚠️ CREDIT ALREADY DEDUCTED
+         |                           |      ❌ ORDER NOT CREATED
+         |                           |
+         |  ❌ Inconsistent state!
+```
+
+### Database Transaction คืออะไร?
+
+**Database Transaction** คือกลุ่มของคำสั่ง (เช่น `INSERT`, `UPDATE`, `DELETE`) ที่ทำงานกับฐานข้อมูล ซึ่งจะถูกมองว่าเป็น **"หน่วยการทำงานเดียวที่แบ่งแยกไม่ได้"**
+
+หัวใจสำคัญของมันคือคุณสมบัติ **ACID** ที่รับประกันความน่าเชื่อถือของการเปลี่ยนแปลงข้อมูล:
+
+- **Atomicity (ทำงานพร้อมกันทั้งหมด หรือไม่เลย):** การดำเนินการทั้งหมดใน Transaction จะต้องสำเร็จทั้งหมด (เรียกว่า **Commit**) หรือถ้ามีข้อผิดพลาดแม้แต่อันเดียว ทุกอย่างที่ทำไปก่อนหน้าจะถูกยกเลิกทั้งหมด (เรียกว่า **Rollback**) กลับสู่สถานะเริ่มต้น
+- **Consistency (ความสอดคล้อง):** Transaction จะต้องทำให้ข้อมูลเปลี่ยนจากสถานะที่ถูกต้องหนึ่ง ไปยังอีกสถานะที่ถูกต้องหนึ่งเสมอ จะไม่มีการทิ้งข้อมูลให้อยู่ในสถานะครึ่งๆ กลางๆ
+- **Isolation (การแยกตัว):** Transaction ที่ทำงานพร้อมกันหลายๆ อัน จะต้องไม่กวนกัน ผลลัพธ์จะต้องเหมือนกับว่า Transaction เหล่านั้นทำงานเรียงกันทีละอัน
+- **Durability (ความคงทน):** เมื่อ Transaction ถูก Commit แล้ว ข้อมูลนั้นจะถูกบันทึกอย่างถาวรและจะไม่สูญหายไป แม้ว่าจะเกิดไฟดับหรือระบบล่มก็ตาม
+
+**สรุป:** Database Transaction เป็นกลไกใน **ระดับฐานข้อมูล** ที่รับประกันว่าการเขียน/ลบ/แก้ไขข้อมูลจะเสร็จสมบูรณ์หรือล้มเหลวไปพร้อมกันทั้งหมด
+
+### Unit of Work คืออะไร?
+
+**Unit of Work (UoW)** เป็น **Design Pattern** ที่ใช้ใน **Service Layer** ใช้จัดกลุ่มของหลายๆ operation (insert, update, delete) ให้อยู่ใน **transaction เดียวกัน** โดยมุ่งเน้นที่ **ความถูกต้องของข้อมูล (Consistency)** และ **การ rollback อัตโนมัติเมื่อเกิดข้อผิดพลาด**
+
+**องค์ประกอบของ Unit of Work**
+
+1. Start / Begin: เริ่มต้น transaction
+2. Register Changes: เก็บรายการ operation ที่จะทำ (insert, update, delete)
+3. Commit: ถ้าทุกอย่างผ่าน → commit DB
+4. Rollback: ถ้า error เกิดขึ้น → ยกเลิกทั้งหมด (rollback)
+5. Post-Commit Hook: รัน side effects (เช่น send email) **หลังจาก** commit สำเร็จ
+
+### สร้าง Transactor(Unit of Work) สำหรับจัดการ Database Transaction
+
+เพื่อให้การทำงานกับหลาย repository ในหนึ่ง business flow (เช่น การหักเครดิตลูกค้าและสร้างออเดอร์) มีความ atomic มากขึ้น เราสามารถใช้ **Transactor** เพื่อควบคุม transaction และทำ rollback อัตโนมัติเมื่อเกิด error
+
+<aside>
+💡
+
+โค้ดส่วนนี้จะถูกดัดแปลงมาจาก <https://github.com/Thiht/transactor>
+
+</aside>
+
+- สร้าง Interface กลาง `DBTX` เพื่อให้ repository ทั้งหมดสามารถทำงานได้กับทั้ง `*sqlx.DB` และ `*sqlx.Tx`
+
+    > สร้างไฟล์ `util/storage/sqldb/transactor/types.go`
+    >
+
+    ```go
+    package transactor
+    
+    import (
+     "context"
+     "database/sql"
+    
+     "github.com/jmoiron/sqlx"
+    )
+    
+    // DBTX is the common interface between *[sqlx.DB] and *[sqlx.Tx].
+    type DBTX interface {
+     // database/sql methods
+    
+     ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+     PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+     QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+     QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+    
+     Exec(query string, args ...any) (sql.Result, error)
+     Prepare(query string) (*sql.Stmt, error)
+     Query(query string, args ...any) (*sql.Rows, error)
+     QueryRow(query string, args ...any) *sql.Row
+    
+     // sqlx methods
+    
+     GetContext(ctx context.Context, dest any, query string, args ...any) error
+     MustExecContext(ctx context.Context, query string, args ...any) sql.Result
+     NamedExecContext(ctx context.Context, query string, arg any) (sql.Result, error)
+     PrepareNamedContext(ctx context.Context, query string) (*sqlx.NamedStmt, error)
+     PreparexContext(ctx context.Context, query string) (*sqlx.Stmt, error)
+     QueryRowxContext(ctx context.Context, query string, args ...any) *sqlx.Row
+     QueryxContext(ctx context.Context, query string, args ...any) (*sqlx.Rows, error)
+     SelectContext(ctx context.Context, dest any, query string, args ...any) error
+    
+     Get(dest any, query string, args ...any) error
+     MustExec(query string, args ...any) sql.Result
+     NamedExec(query string, arg any) (sql.Result, error)
+     NamedQuery(query string, arg any) (*sqlx.Rows, error)
+     PrepareNamed(query string) (*sqlx.NamedStmt, error)
+     Preparex(query string) (*sqlx.Stmt, error)
+     QueryRowx(query string, args ...any) *sqlx.Row
+     Queryx(query string, args ...any) (*sqlx.Rows, error)
+     Select(dest any, query string, args ...any) error
+    
+     Rebind(query string) string
+     BindNamed(query string, arg any) (string, []any, error)
+     DriverName() string
+    }
+    
+    type sqlxDB interface {
+     DBTX
+     BeginTxx(ctx context.Context, opts *sql.TxOptions) (*sqlx.Tx, error)
+    }
+    
+    type sqlxTx interface {
+     Commit() error
+     Rollback() error
+    }
+    
+    var (
+     _ DBTX   = &sqlx.DB{}
+     _ DBTX   = &sqlx.Tx{}
+     _ sqlxDB = &sqlx.DB{}
+     _ sqlxTx = &sqlx.Tx{}
+    )
+    
+    type (
+     transactorKey struct{}
+     // DBTXContext is used to get the current DB handler from the context.
+     // It returns the current transaction if there is one, otherwise it will return the original DB.
+     DBTXContext func(context.Context) DBTX
+    )
+    
+    func txToContext(ctx context.Context, tx sqlxDB) context.Context {
+     return context.WithValue(ctx, transactorKey{}, tx)
+    }
+    
+    func txFromContext(ctx context.Context) sqlxDB {
+     if tx, ok := ctx.Value(transactorKey{}).(sqlxDB); ok {
+      return tx
+     }
+     return nil
+    }
+    ```
+
+    `DBTX` จะถูก inject ผ่าน context เพื่อให้ repository ไม่ต้องรู้ว่าใช้ DB หรือ Tx อยู่
+
+- เพิ่มการรองรับ Nested Transactions
+เราสามารถเลือกกลยุทธ์การจัดการ nested transactions ได้ 2 แบบ
+  - **ไม่รองรับ** (เหมาะกับระบบที่ควบคุม transaction flow เอง)
+
+        > สร้างไฟล์ `util/storage/sqldb/transactor/nested_transactions_none.go`
+        >
+
+        ```go
+        package transactor
+        
+        import (
+         "context"
+         "database/sql"
+         "errors"
+        
+         "github.com/jmoiron/sqlx"
+        )
+        
+        // NestedTransactionsNone is an implementation that prevents using nested transactions.
+        func NestedTransactionsNone(db sqlxDB, tx *sqlx.Tx) (sqlxDB, sqlxTx) {
+         switch typedDB := db.(type) {
+         case *sqlx.DB:
+          return &nestedTransactionNone{tx}, tx
+        
+         case *nestedTransactionNone:
+          return typedDB, typedDB
+        
+         default:
+          panic("unsupported type")
+         }
+        }
+        
+        type nestedTransactionNone struct {
+         *sqlx.Tx
+        }
+        
+        func (t *nestedTransactionNone) BeginTxx(_ context.Context, _ *sql.TxOptions) (*sqlx.Tx, error) {
+         return nil, errors.New("nested transactions are not supported")
+        }
+        
+        func (t *nestedTransactionNone) Commit() error {
+         return errors.New("nested transactions are not supported")
+        }
+        
+        func (t *nestedTransactionNone) Rollback() error {
+         return errors.New("nested transactions are not supported")
+        }
+        
+        ```
+
+  - **ใช้ Savepoints** (เหมาะกับระบบที่อาจซ้อน transaction ได้)
+
+        > สร้างไฟล์ `util/storage/sqldb/transactor/nested_transactions_savepoint.go`
+        >
+
+        ```go
+        package transactor
+        
+        import (
+         "context"
+         "database/sql"
+         "fmt"
+         "strconv"
+         "sync/atomic"
+        
+         "github.com/jmoiron/sqlx"
+        )
+        
+        // NestedTransactionsSavepoints is a nested transactions implementation using savepoints.
+        // It's compatible with PostgreSQL, MySQL, MariaDB, and SQLite.
+        func NestedTransactionsSavepoints(db sqlxDB, tx *sqlx.Tx) (sqlxDB, sqlxTx) {
+         switch typedDB := db.(type) {
+         case *sqlx.DB:
+          return &nestedTransactionSavepoints{Tx: tx}, tx
+        
+         case *nestedTransactionSavepoints:
+          nestedTransaction := &nestedTransactionSavepoints{
+           Tx:    tx,
+           depth: typedDB.depth + 1,
+          }
+          return nestedTransaction, nestedTransaction
+        
+         default:
+          panic("unsupported type")
+         }
+        }
+        
+        type nestedTransactionSavepoints struct {
+         *sqlx.Tx
+         depth int64
+         done  atomic.Bool
+        }
+        
+        func (t *nestedTransactionSavepoints) BeginTxx(ctx context.Context, _ *sql.TxOptions) (*sqlx.Tx, error) {
+         if _, err := t.ExecContext(ctx, "SAVEPOINT sp_"+strconv.FormatInt(t.depth+1, 10)); err != nil {
+          return nil, fmt.Errorf("failed to create savepoint: %w", err)
+         }
+        
+         return t.Tx, nil
+        }
+        
+        func (t *nestedTransactionSavepoints) Commit() error {
+         if !t.done.CompareAndSwap(false, true) {
+          return sql.ErrTxDone
+         }
+        
+         if _, err := t.Exec("RELEASE SAVEPOINT sp_" + strconv.FormatInt(t.depth, 10)); err != nil {
+          return fmt.Errorf("failed to release savepoint: %w", err)
+         }
+        
+         return nil
+        }
+        
+        func (t *nestedTransactionSavepoints) Rollback() error {
+         if !t.done.CompareAndSwap(false, true) {
+          return sql.ErrTxDone
+         }
+        
+         if _, err := t.Exec("ROLLBACK TO SAVEPOINT sp_" + strconv.FormatInt(t.depth, 10)); err != nil {
+          return fmt.Errorf("failed to rollback to savepoint: %w", err)
+         }
+        
+         return nil
+        }
+        ```
+
+- สร้าง Transactor ซึ่งตัว `Transactor` จะทำหน้าที่เริ่ม transaction, inject context, และ commit/rollback โดยอัตโนมัติ
+
+    > สร้างไฟล์ `util/storage/sqldb/transactor/transactor.go`
+    >
+
+    ```go
+    // Ref: https://github.com/Thiht/transactor/blob/main/sqlx/transactor.go
+    package transactor
+    
+    import (
+     "context"
+     "fmt"
+     "go-mma/util/logger"
+    
+     "github.com/jmoiron/sqlx"
+    )
+    
+    type PostCommitHook func(ctx context.Context) error
+    
+    type Transactor interface {
+     WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error) error
+    }
+    
+    type (
+     sqlxDBGetter               func(context.Context) sqlxDB
+     nestedTransactionsStrategy func(sqlxDB, *sqlx.Tx) (sqlxDB, sqlxTx)
+    )
+    
+    type sqlTransactor struct {
+     sqlxDBGetter
+     nestedTransactionsStrategy
+    }
+    
+    type Option func(*sqlTransactor)
+    
+    func New(db *sqlx.DB, opts ...Option) (Transactor, DBTXContext) {
+     t := &sqlTransactor{
+      sqlxDBGetter: func(ctx context.Context) sqlxDB {
+       if tx := txFromContext(ctx); tx != nil {
+        return tx
+       }
+       return db
+      },
+      nestedTransactionsStrategy: NestedTransactionsNone, // Default strategy
+     }
+    
+     for _, opt := range opts {
+      opt(t)
+     }
+    
+     dbGetter := func(ctx context.Context) DBTX {
+      if tx := txFromContext(ctx); tx != nil {
+       return tx
+      }
+    
+      return db
+     }
+    
+     return t, dbGetter
+    }
+    
+    func WithNestedTransactionStrategy(strategy nestedTransactionsStrategy) Option {
+     return func(t *sqlTransactor) {
+      t.nestedTransactionsStrategy = strategy
+     }
+    }
+    
+    func (t *sqlTransactor) WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error) error {
+     currentDB := t.sqlxDBGetter(ctx)
+    
+     tx, err := currentDB.BeginTxx(ctx, nil)
+     if err != nil {
+      return fmt.Errorf("failed to begin transaction: %w", err)
+     }
+    
+     var hooks []PostCommitHook
+    
+     registerPostCommitHook := func(hook PostCommitHook) {
+      hooks = append(hooks, hook)
+     }
+    
+     newDB, currentTX := t.nestedTransactionsStrategy(currentDB, tx)
+     defer func() {
+      _ = currentTX.Rollback() // If rollback fails, there's nothing to do, the transaction will expire by itself
+     }()
+     ctxWithTx := txToContext(ctx, newDB)
+    
+     if err := txFunc(ctxWithTx, registerPostCommitHook); err != nil {
+      return err
+     }
+    
+     if err := currentTX.Commit(); err != nil {
+      return fmt.Errorf("failed to commit transaction: %w", err)
+     }
+    
+     // หลังจาก commit แล้ว รัน hook แบบ isolated
+     go func() {
+      for _, hook := range hooks {
+       func(h PostCommitHook) {
+        defer func() {
+         if r := recover(); r != nil {
+          // Log panic ที่เกิดใน hook
+          logger.Log.Error(fmt.Sprintf("post-commit hook panic: %v", r))
+         }
+        }()
+        if err := h(ctx); err != nil {
+         logger.Log.Error(fmt.Sprintf("post-commit hook error: %v", err))
+        }
+       }(hook)
+      }
+     }()
+    
+     return nil
+    }
+    
+    func IsWithinTransaction(ctx context.Context) bool {
+     return ctx.Value(transactorKey{}) != nil
+    }
+    ```
+
+**สรุป**
+
+- ใช้ `Transactor` เพื่อควบคุมหลาย DB operation ให้เป็น atomic unit
+- Inject `DBTX` ผ่าน context ทำให้ repository ไม่ต้องรู้ว่าอยู่ใน transaction หรือไม่
+- รองรับ nested transactions ด้วย savepoint หากจำเป็น
+
+### ปรับปรุง Repository Layer
+
+ปรับปรุงโค้ดใน layer ของ repository เพื่อรองรับการใช้งาน transaction ร่วมกันข้ามหลาย repository โดยเปลี่ยนจากการ inject ตัว database connection (`*sql.DB` หรือ `sqldb.DBContext`) มาเป็นการใช้ interface ใหม่ที่ชื่อว่า `transactor.DBContext`
+
+**สิ่งที่เปลี่ยนแปลง**
+
+- เดิมใช้ `dbCtx sqldb.DBContext`
+- เปลี่ยนเป็น `dbCtx transactor.DBContext`
+- เวลาจะเรียกใช้ `db.QueryContext(...)`, `db.ExecContext(...)` หรืออื่น ๆ ให้ดึง `sql.DB` หรือ `sql.Tx` จาก `context.Context` โดยใช้ `r.dbCtx(ctx)` แทน
+
+**ปรับปรุงโค้ด**
+
+- แก้ไขไฟล์ `repository/customer.go`
+
+    ```go
+    package repository
+    
+    import (
+     "context"
+     "database/sql"
+     "fmt"
+     "go-mma/model"
+     "go-mma/util/errs"
+     "go-mma/util/storage/sqldb/transactor"
+     "time"
+    )
+    
+    type CustomerRepository struct {
+     dbCtx transactor.DBTXContext // <-- ตรงนี้
+    }
+    
+    func NewCustomerRepository(dbCtx transactor.DBTXContext) // <-- ตรงนี้
+    *CustomerRepository {
+     // ...
+    }
+    
+    func (r *CustomerRepository) Create(ctx context.Context, customer *model.Customer) error {
+     // ...
+    
+     err := r.dbCtx(ctx). // <-- ตรงนี้ จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+     
+     // ...
+    }
+    
+    func (r *CustomerRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+     // ...
+     
+     err := r.dbCtx(ctx). // <-- ตรงนี้ จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+     
+     // ...
+    }
+    
+    func (r *CustomerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
+     // ...
+     
+     err := r.dbCtx(ctx). // <-- ตรงนี้ จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+     
+     // ...
+    }
+    
+    func (r *CustomerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
+     // ...
+    
+     err := r.dbCtx(ctx). // <-- ตรงนี้ จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+     
+     // ...
+    }
+    
+    ```
+
+- แก้ไขไฟล์ `repository/order.go`
+
+    ```go
+    package repository
+    
+    import (
+     "context"
+     "database/sql"
+     "fmt"
+     "go-mma/model"
+     "go-mma/util/errs"
+     "go-mma/util/storage/sqldb/transactor"
+     "time"
+    )
+    
+    type OrderRepository struct {
+     dbCtx transactor.DBTXContext  // <-- ตรงนี้
+    }
+    
+    func NewOrderRepository(dbCtx transactor.DBTXContext) // <-- ตรงนี้
+    *OrderRepository {
+     // ...
+    }
+    
+    func (r *OrderRepository) Create(ctx context.Context, m *model.Order) error {
+     // ...
+    
+     err := r.dbCtx(ctx). // <-- ตรงนี้ จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+     
+     // ...
+    }
+    
+    func (r *OrderRepository) FindByID(ctx context.Context, id int64) (*model.Order, error) {
+     // ...
+     
+     err := r.dbCtx(ctx). // <-- ตรงนี้ จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+     
+     // ...
+    }
+    
+    func (r *OrderRepository) Cancel(ctx context.Context, id int64) error {
+     // ...
+     
+     _, err := r.dbCtx(ctx). // <-- ตรงนี้ จะเป็น *sqlx.DB หรือ *sqlx.Tx ก็ได้
+     
+     // ...
+    }
+    ```
+
+**สรุปแนวทาง**
+
+- ใช้ `transactor.DBTXContext` แทนการเข้าถึง `sql.DB` โดยตรง
+- `dbCtx(ctx)` จะ return `sql.Tx` ถ้ามี transaction, หรือ `sql.DB` ถ้าไม่มี
+- ทำให้ repository ทุกตัวสามารถทำงานร่วมกันใน transaction เดียวได้ โดยไม่ต้องรู้ว่าใช้ `sql.Tx` หรือ `sql.DB`
+
+### ปรับปรุง Service Layer
+
+ในชั้น `service` เราจะรับ `transactor.Transactor` มาตั้งแต่ตอนสร้าง Service และจะใช้ `WithinTransaction()` เพื่อให้ทุกคำสั่งฐานข้อมูลอยู่ภายใต้ transaction เดียวกัน ซึ่งช่วยให้ rollback ได้หากเกิดข้อผิดพลาดในกระบวนการใดๆ
+
+**ปรับปรุงโค้ด**
+
+- แก้ไขไฟล์ `service/customer.go` ย้ายส่วนการบันทึกลูกค้าใหม่ กับส่งอีเมล มาไว้ใน `WithinTransaction`
+
+    ```go
+    package service
+    
+    // ...
+    
+    type CustomerService struct {
+     transactor transactor.Transactor // <-- ตรงนี้
+     custRepo   *repository.CustomerRepository
+     notiSvc    *NotificationService
+    }
+    
+    func NewCustomerService(
+     transactor transactor.Transactor, // <-- ตรงนี้
+     custRepo *repository.CustomerRepository,
+     notiSvc *NotificationService,
+    ) *CustomerService {
+     return &CustomerService{
+      transactor: transactor, // <-- ตรงนี้
+      custRepo:   custRepo,
+      notiSvc:    notiSvc,
+     }
+    }
+    
+    func (s *CustomerService) CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error) {
+     // ตรวจสอบความถูกต้องตาม "กฎทางธุรกิจ" (Business Logic/Semantic Validation)
+     // Business Logic: email ต้องไม่ซ้ำในฐานข้อมูล
+     
+     // แปลง DTO → Model
+     customer := model.NewCustomer(req.Email, req.Credit)
+     
+      // <-- แก้ตรงนี้
+     // ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction
+     err = s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+         
+      // Unit of Work: register change
+      if err := s.custRepo.Create(ctx, customer); err != nil {
+       // error logging
+       logger.Log.Error(err.Error())
+       return err // Unit of Work: rollback จะทำงาน
+      }
+    
+      // ส่งอีเมลต้อนรับ
+      if err := s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
+       "message": "Thank you for joining us! We are excited to have you as a member.",
+      }); err != nil {
+       // error logging
+       logger.Log.Error(err.Error())
+       return err // Unit of Work: rollback จะทำงาน
+      }
+    
+        // Unit of Work: commit จะเกิดขึ้นอัตโนมัติหลัง func สำเร็จ
+      return nil
+     })
+    
+     if err != nil {
+      return nil, err
+     }
+    
+     // สร้าง DTO Response
+     // ...
+    }
+    ```
+
+- แก้ไขไฟล์ `service/order.go` ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมล มาไว้ใน `WithinTransaction`
+
+    ```go
+    package service
+    
+    // ...
+    
+    type OrderService struct {
+     transactor transactor.Transactor // <-- ตรงนี้
+     custRepo   *repository.CustomerRepository
+     orderRepo  *repository.OrderRepository
+     notiSvc    *NotificationService
+    }
+    
+    func NewOrderService(
+     transactor transactor.Transactor, // <-- ตรงนี้
+     custRepo *repository.CustomerRepository,
+     orderRepo *repository.OrderRepository,
+     notiSvc *NotificationService) *OrderService {
+     return &OrderService{
+      transactor: transactor, // <-- ตรงนี้
+      custRepo:   custRepo,
+      orderRepo:  orderRepo,
+      notiSvc:    notiSvc,
+     }
+    }
+    
+    func (s *OrderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error) {
+     // Business Logic: ตรวจสอบ customer id ในฐานข้อมูล
+     // ...
+    
+        // <-- แก้ตรงนี้
+     // ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction
+     var order *model.Order
+     err = s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+       
+       // Business Logic Rule: ตัดยอด credit ถ้าไม่พอให้ error
+      if err := customer.ReserveCredit(req.OrderTotal); err != nil {
+       return err
+      }
+     
+        // Unit of Work: register change
+      // ตัดยอด credit ในตาราง customer
+      if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
+       logger.Log.Error(err.Error())
+       return err // Unit of Work: rollback จะทำงาน
+      }
+    
+      // สร้าง order ใหม่ DTO -> Model
+      order = model.NewOrder(req.CustomerID, req.OrderTotal)
+      // Unit of Work: register change
+      // บันทึกลงฐานข้อมูล
+      err = s.orderRepo.Create(ctx, order)
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err // Unit of Work: rollback จะทำงาน
+      }
+    
+      // ส่งอีเมลยืนยัน
+      err = s.notiSvc.SendEmail(customer.Email, "Order Created", map[string]any{
+       "order_id": order.ID,
+       "total":    order.OrderTotal,
+      })
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err // Unit of Work: rollback จะทำงาน
+      }
+        
+        // Unit of Work: commit จะเกิดขึ้นอัตโนมัติหลัง func สำเร็จ
+      return nil
+     })
+    
+     // จัดการ error จากใน transactor
+     if err != nil {
+      return nil, err
+     }
+    
+     // สร้าง DTO Response
+     // ...
+    }
+    ```
+
+### Post-Commit Hook
+
+เราควรแยกโค้ดส่วนที่ทำให้เกิด side effects เช่น ส่งอีเมล, call external service มาทำงาน**หลังจาก** commit สำเร็จ เพื่อทำให้มั่นใจว่า data persist แล้ว จะไม่ถูก rollback เพราะ external failure
+
+**ก่อนแก้ไข**
+
+```go
+// service/customer.go
+// func (s *customerService) CreateCustomer(...)
+err = s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(PostCommitHook)) error {
+     
+  // Unit of Work: register change
+  if err := s.custRepo.Create(ctx, customer); err != nil {
+   // error logging
+   logger.Log.Error(err.Error())
+   return err // Unit of Work: rollback จะทำงาน
   }
+
+  // ส่งอีเมลต้อนรับ <-- side-effect
+  if err := s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
+   "message": "Thank you for joining us! We are excited to have you as a member.",
+  }); err != nil {
+   // error logging
+   logger.Log.Error(err.Error())
+   return err // Unit of Work: rollback จะทำงาน
   }
 
-  ```
+    // Unit of Work: commit จะเกิดขึ้นอัตโนมัติหลัง func สำเร็จ
+  return nil
+ })
+```
+
+**หลังแก้ไข**
+
+```go
+// service/customer.go
+// func (s *customerService) CreateCustomer(...)
+err = s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(PostCommitHook)) error {
+     
+  // Unit of Work: register change
+  if err := s.custRepo.Create(ctx, customer); err != nil {
+   // error logging
+   logger.Log.Error(err.Error())
+   return err // Unit of Work: rollback จะทำงาน
+  }
+
+  // เพิ่มส่งอีเมลต้อนรับ เข้าไปใน hook แทนการเรียกใช้งานทันที
+  registerPostCommitHook(func(ctx context.Context) error {
+   return s.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
+    "message": "Thank you for joining us! We are excited to have you as a member."})
+  })
+
+    // Unit of Work: commit จะเกิดขึ้นอัตโนมัติหลัง func สำเร็จ
+  return nil
+ })
+```
+
+แก้ไขที่ `func (s *orderService) CreateOrder(…)` ด้วย
+
+### ปรับปรุง Dependency Injection
+
+เพิ่มการ inject `transactor.Transactor` เข้าไปใน Service Layer
+
+- แก้ไขไฟล์ `application/http.go`
+
+    ```go
+    func (s *httpServer) RegisterRoutes(dbCtx sqldb.DBContext) {
+     v1 := s.app.Group("/api/v1")
+    
+      // สร้าง transactor กับ dbCtx จาก transactor
+     transactor, dbtxCtx := transactor.New(dbCtx.DB()) // <-- ตรงนี้
+     customers := v1.Group("/customers")
+     {
+      repo := repository.NewCustomerRepository(dbtxCtx) // <-- ตรงนี้
+      svcNoti := service.NewNotificationService()
+      svc := service.NewCustomerService(transactor, repo, svcNoti) // <-- ตรงนี้
+      hdl := handler.NewCustomerHandler(svc)
+      customers.Post("", hdl.CreateCustomer)
+     }
+    
+     orders := v1.Group("/orders")
+     {
+      repoCust := repository.NewCustomerRepository(dbtxCtx) // <-- ตรงนี้
+      repoOrder := repository.NewOrderRepository(dbtxCtx) // <-- ตรงนี้
+      svcNoti := service.NewNotificationService()
+      svcOrder := service.NewOrderService(transactor, repoCust, repoOrder, svcNoti) // <-- ตรงนี้
+      hdl := handler.NewOrderHandler(svcOrder)
+      orders.Post("", hdlr.CreateOrder)
+      orders.Delete("/:orderID", hdl.CancelOrder)
+     }
+    }
+    ```
+
+## นำหลักการ Dependency Inversion มาใช้ในระบบจริง
+
+**Dependency Inversion** คือ โค้ดส่วนหลัก (เช่น Handler, Service) ไม่ควรขึ้นกับโค้ดส่วนล่าง (เช่น Repository แบบเฉพาะเจาะจง), แต่ควรขึ้นกับ Interface แทน
+
+มีเป้าหมาย คือ
+
+- ลดการผูกติดกันของโค้ด (loose coupling)
+- เปลี่ยน implementation ได้ง่าย เช่นเปลี่ยนจาก PostgreSQL → MongoDB
+- ทำ unit test ได้ง่าย เพราะ mock ได้จาก interface
+
+เมื่อใช้ Dependency Inversion
+
+```go
+┌────────────┐
+│  Handler   │ ← struct: CustomerHandler
+└────┬───────┘
+     │ depends on interface
+     ▼
+┌────────────┐
+│  Service   │  ← interface: CustomerService
+└────┬───────┘
+     │ implemented by
+     ▼
+┌────────────────────┐
+│ ServiceImp         │ ← struct: customerService
+└────────────────────┘
+     │ depends on interface
+     ▼
+┌────────────┐
+│ Repository │  ← interface: CustomerRepository
+└────┬───────┘
+     │ implemented by
+     ▼
+┌────────────────────┐
+│ PostgresRepository │ ← struct: customerRepository
+└────────────────────┘
+```
+
+### Repository Layer
+
+- แก้ไขไฟล์ `repository/customer.go`
+
+    ```go
+    package repository
+    
+    // ...
+    
+    // --> Step 1: สร้าง interface
+    type CustomerRepository interface {
+     Create(ctx context.Context, customer *model.Customer) error
+     ExistsByEmail(ctx context.Context, email string) (bool, error)
+     FindByID(ctx context.Context, id int64) (*model.Customer, error)
+     UpdateCredit(ctx context.Context, customer *model.Customer) error
+    }
+    
+    type customerRepository struct { // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+     dbCtx transactor.DBTXContext
+    }
+    
+    // --> Step 3: return เป็น interface
+    func NewCustomerRepository(dbCtx transactor.DBTXContext) CustomerRepository {
+     return &customerRepository{ // --> Step 4: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+      dbCtx: dbCtx,
+     }
+    }
+    
+    // --> Step 5: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (r *customerRepository) Create(ctx context.Context, customer *model.Customer) error {
+     // ...
+    }
+    
+    // --> Step 6: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (r *customerRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+     // ...
+    }
+    
+    // --> Step 7: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
+     // ...
+    }
+    
+    // --> Step 8: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (r *customerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
+     // ...
+    }
+    ```
+
+- แก้ไขไฟล์ `repository/order.go`
+
+    ```go
+    package repository
+    
+    // ...
+    
+    // --> Step 1: สร้าง interface
+    type OrderRepository interface {
+     Create(ctx context.Context, order *model.Order) error
+     FindByID(ctx context.Context, id int64) (*model.Order, error)
+     Cancel(ctx context.Context, id int64) error
+    }
+    
+    type orderRepository struct { // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+     dbCtx transactor.DBTXContext
+    }
+    
+    // --> Step 3: return เป็น interface
+    func NewOrderRepository(dbCtx transactor.DBTXContext) OrderRepository {
+     return &orderRepository{ // --> Step 4: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+      dbCtx: dbCtx,
+     }
+    }
+    
+    // --> Step 5: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (r *orderRepository) Create(ctx context.Context, m *model.Order) error {
+     // ...
+    }
+    
+    // --> Step 6: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (r *orderRepository) FindByID(ctx context.Context, id int64) (*model.Order, error) {
+     // ...
+    }
+    
+    // --> Step 7: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (r *orderRepository) Cancel(ctx context.Context, id int64) error {
+     // ...
+    }
+    ```
+
+### Service Layer
+
+- แก้ไขไฟล์ `service/notification.go`
+
+    ```go
+    package service
+    
+    import (
+     "fmt"
+     "go-mma/util/logger"
+    )
+    
+    // --> Step 1: สร้าง interface
+    type NotificationService interface {
+     SendEmail(to string, subject string, payload map[string]any) error
+    }
+    
+    // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    type notificationService struct {
+    }
+    
+    // --> Step 3: return เป็น interface
+    func NewNotificationService() NotificationService {
+     return &notificationService{} // --> Step 4: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    }
+    
+    // --> Step 5: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (s *notificationService) SendEmail(to string, subject string, payload map[string]any) error {
+     // ...
+    }
+    ```
+
+- แก้ไขไฟล์ `service/customer.go`
+
+    ```go
+    package service
+    
+    // ...
+    
+    // --> Step 1: สร้าง interface
+    type CustomerService interface {
+     CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error)
+    }
+    
+    // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    type customerService struct {
+     transactor transactor.Transactor
+     custRepo   repository.CustomerRepository // --> step 3: เปลี่ยนจาก pointer เป็น interface
+     notiSvc    NotificationService // --> step 4: เปลี่ยนจาก pointer เป็น interface
+    }
+    
+    func NewCustomerService(
+     transactor transactor.Transactor,
+     custRepo repository.CustomerRepository, // --> step 5: เปลี่ยนจาก pointer เป็น interface
+     notiSvc NotificationService, // --> step 6: เปลี่ยนจาก pointer เป็น interface
+    ) CustomerService {            // --> Step 7: return เป็น interface
+     return &customerService{     // --> Step 8: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+      transactor: transactor,
+      custRepo:   custRepo,
+      notiSvc:    notiSvc,
+     }
+    }
+    
+    // --> Step 9: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (s *customerService) CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error) {
+     // ...
+    }
+    ```
+
+- แก้ไขไฟล์ `service/order.go`
+
+    ```go
+    package service
+    
+    // ...
+    
+    // --> Step 1: สร้าง interface
+    type OrderService interface {
+     CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error)
+     CancelOrder(ctx context.Context, id int64) error
+    }
+    
+    // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    type orderService struct {
+     transactor transactor.Transactor
+     custRepo   repository.CustomerRepository // --> step 3: เปลี่ยนจาก pointer เป็น interface
+     orderRepo  repository.OrderRepository // --> step 4: เปลี่ยนจาก pointer เป็น interface
+     notiSvc    NotificationService // --> step 5: เปลี่ยนจาก pointer เป็น interface
+    }
+    
+    func NewOrderService(
+     transactor transactor.Transactor,
+     custRepo repository.CustomerRepository, // --> step 6: เปลี่ยนจาก pointer เป็น interface
+     orderRepo repository.OrderRepository, // --> step 7: เปลี่ยนจาก pointer เป็น interface
+     notiSvc NotificationService, // --> step 8: เปลี่ยนจาก pointer เป็น interface
+     ) OrderService {            // --> Step 9: return เป็น interface
+     return &orderService{       // --> Step 10: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+      transactor: transactor,
+      custRepo:   custRepo,
+      orderRepo:  orderRepo,
+      notiSvc:    notiSvc,
+     }
+    }
+    
+    // --> Step 11: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (s *orderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error) {
+     // ...
+    }
+    
+    // --> Step 12: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+    func (s *orderService) CancelOrder(ctx context.Context, id int) error {
+     // ...
+    }
+    ```
+
+### Presentation Layer
+
+- แก้ไขไฟล์ `handler/customer.go` แก้ให้รับ service มาเป็น interface
+
+    ```go
+    package handler
+    
+    // ...
+    
+    type CustomerHandler struct {
+     custService service.CustomerService // <-- Step1: เปลี่ยนจาก pointer เป็น interface
+    }
+    
+    func NewCustomerHandler(custService service.CustomerService, // <-- Step2: เปลี่ยนจาก pointer เป็น interface
+     ) *CustomerHandler {
+     return &CustomerHandler{
+      custService: custService,
+     }
+    }
+    ```
+
+- แก้ไขไฟล์ `handler/order.go` แก้ให้รับ service มาเป็น interface
+
+    ```go
+    package handler
+    
+    // ...
+    
+    type OrderHandler struct {
+     orderSvc service.OrderService // <-- Step1: เปลี่ยนจาก pointer เป็น interface
+    }
+    
+    func NewOrderHandler(orderSvc service.OrderService, // <-- Step1: เปลี่ยนจาก pointer เป็น interface
+    ) *OrderHandler {
+     return &OrderHandler{orderSvc: orderSvc}
+    }
+    ```
+
+## แปลงโครงสร้างไปสู่ Modular Architecture อย่างเป็นขั้นตอน
+
+ถัดมาเราจะมาเปลี่ยนโครงสร้างจากที่แยกตาม "layer" (เช่น handler, service, repository) ไปเป็นการแยกตาม "feature หรือ use case” โดยใช้หลักการของ [Vertical Slice Architecture](https://somprasongd.work/blog/architecture/vertical-slice) คือ
+
+- แยกตามฟีเจอร์ เช่น `customer`, `order`, `notification`
+- ภายในแต่ละฟีเจอร์มีโค้ดของมันเอง: `handler`, `dto`, `service`, `model`, `repository`, `test`
+- ทำให้ แยกอิสระ, ลดการพึ่งพาข้าม slice, เพิ่ม modularity
+
+### โครงสร้างใหม่
+
+```bash
+.
+├── cmd
+│   └── api
+│       └── main.go         # bootstraps all modules
+├── config
+│   └── config.go
+├── modules                 
+│   ├── customer
+│   │   ├── handler
+│   │   ├── dto
+│   │   ├── model
+│   │   ├── repository
+│   │   ├── service
+│   │   └── module.go       # wiring
+│   ├── notification
+│   │   ├── service
+│   │   └── module.go 
+│   └── order
+│       ├── handler
+│       ├── dto
+│       ├── model
+│       ├── repository
+│       ├── service
+│       └── module.go
+├── application
+│   ├── application.go      # register all modules
+│   ├── http.go             # remove register all routes
+│   └── middleware
+│       ├── request_logger.go
+│       └── response_error.go
+├── migrations
+│   └── ...sql
+├── util
+│   ├── module              # new
+│   │   └── module.go       # module interface
+│   └── ...
+└── go.mod
+```
+
+### Notification Module
+
+ทำการย้ายโค้ดทีเกี่ยวกับ notification มาไว้ที่ `modules/notification`
+
+- ย้ายไฟล์ `service/notification.go` มาไว้ที่ `modules/notification/service/notification.go`
+
+### Customer Module
+
+ทำการย้ายโค้ดทีเกี่ยวกับ customer มาไว้ที่ `modules/customer`
+
+- ย้ายไฟล์ `model/customer.go` มาไว้ที่ `modules/customer/model/customer.go`
+- ย้ายไฟล์ `dto/customer_*.go` มาไว้ที่ `modules/customer/dto/customer_*.go`
+- ย้ายไฟล์ `repository/customer.go` มาไว้ที่ `modules/customer/repository/customer.go`
+
+    ```go
+    package repository
+    
+    import (
+     "context"
+     "database/sql"
+     "fmt"
+     "go-mma/modules/customer/model" // <-- แก้ตรงนี้ด้วย
+     "go-mma/util/errs"
+     "go-mma/util/storage/sqldb/transactor"
+     "time"
+    )
+    ```
+
+- ย้ายไฟล์ `service/customer.go` มาไว้ที่ `modules/customer/service/customer.go`
+
+    ```go
+    package service
+    
+    import (
+     "context"
+     "go-mma/modules/customer/dto"        // <-- แก้ตรงนี้ด้วย
+     "go-mma/modules/customer/model"      // <-- แก้ตรงนี้ด้วย
+     "go-mma/modules/customer/repository" // <-- แก้ตรงนี้ด้วย
+     "go-mma/util/errs"
+     "go-mma/util/logger"
+     "go-mma/util/storage/sqldb/transactor"
+    
+     notiService "go-mma/modules/notification/service" // <-- แก้ตรงนี้ด้วย
+    )
+    
+    // ...
+    
+    type customerService struct {
+     transactor transactor.Transactor
+     custRepo   repository.CustomerRepository
+     notiSvc    notiService.NotificationService // <-- แก้ตรงนี้ด้วย
+    }
+    
+    func NewCustomerService(
+     transactor transactor.Transactor,
+     custRepo repository.CustomerRepository,
+     notiSvc notiService.NotificationService, // <-- แก้ตรงนี้ด้วย
+    ) CustomerService {
+     // ...
+    }
+    ```
+
+- ย้ายไฟล์ `handler/customer.go` มาไว้ที่ `modules/customer/handler/customer.go`
+
+    ```go
+    package handler
+    
+    import (
+     "go-mma/modules/customer/dto"     // <-- แก้ตรงนี้ด้วย
+     "go-mma/modules/customer/service" // <-- แก้ตรงนี้ด้วย
+     "go-mma/util/errs"
+     "strings"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    ```
+
+- ย้ายไฟล์ `tests/customer.http` มาไว้ที่ `modules/customer/test/customer.http`
+
+### Order Module
+
+ทำการย้ายโค้ดทีเกี่ยวกับ order มาไว้ที่ `modules/order`
+
+- ย้ายไฟล์ `model/order.go` มาไว้ที่ `modules/customer/model/order.go`
+- ย้ายไฟล์ `dto/order*.go` มาไว้ที่ `modules/customer/dto/order*.go`
+- ย้ายไฟล์ `repository/order.go` มาไว้ที่ `modules/customer/repository/order.go`
+
+    ```go
+    package repository
+    
+    import (
+     "context"
+     "database/sql"
+     "fmt"
+     "go-mma/modules/order/model" // <-- แก้ตรงนี้ด้วย
+     "go-mma/util/errs"
+     "go-mma/util/storage/sqldb/transactor"
+     "time"
+    )
+    ```
+
+- ย้ายไฟล์ `service/order.go` มาไว้ที่ `modules/customer/service/order.go`
+
+    ```go
+    package service
+    
+    import (
+     "context"
+     "go-mma/modules/order/dto"        // <-- แก้ตรงนี้ด้วย
+     "go-mma/modules/order/model"      // <-- แก้ตรงนี้ด้วย
+     "go-mma/modules/order/repository" // <-- แก้ตรงนี้ด้วย
+     "go-mma/util/errs"
+     "go-mma/util/logger"
+     "go-mma/util/storage/sqldb/transactor"
+    
+     custRepository "go-mma/modules/customer/repository" // <-- แก้ตรงนี้ด้วย
+     notiService "go-mma/modules/notification/service"   // <-- แก้ตรงนี้ด้วย
+    )
+    
+    // ...
+    
+    type orderService struct {
+     transactor transactor.Transactor
+     custRepo   custRepository.CustomerRepository // <-- แก้ตรงนี้ด้วย
+     orderRepo  repository.OrderRepository
+     notiSvc    notiService.NotificationService   // <-- แก้ตรงนี้ด้วย
+    }
+    
+    func NewOrderService(
+     transactor transactor.Transactor,
+     custRepo custRepository.CustomerRepository,   // <-- แก้ตรงนี้ด้วย
+     orderRepo repository.OrderRepository,
+     notiSvc notiService.NotificationService       // <-- แก้ตรงนี้ด้วย
+     ) OrderService {
+     // ...
+    }
+    ```
+
+- ย้ายไฟล์ `handler/order.go` มาไว้ที่ `modules/customer/handler/order.go`
+
+    ```go
+    package handler
+    
+    import (
+     "go-mma/modules/order/dto"      // <-- แก้ตรงนี้ด้วย
+     "go-mma/modules/order/service"  // <-- แก้ตรงนี้ด้วย
+     "go-mma/util/errs"
+     "strconv"
+     "strings"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    ```
+
+- ย้ายไฟล์ `tests/order.http` มาไว้ที่ `modules/customer/test/order.http`
+
+### Feature-level constructor
+
+คือ แนวคิดที่ใช้ *constructor function* เฉพาะสำหรับ "feature" หรือ "module" หนึ่ง ๆ ในระบบ เพื่อ ประกอบ dependencies ทั้งหมดของ "feature" หรือ "module" นั้นเข้าเป็นหน่วยเดียว และซ่อนไว้เบื้องหลัง interface หรือ struct เพื่อให้ใช้งานได้ง่ายและยืดหยุ่น
+
+**ตัวอย่างการใช้งาน**
+
+```go
+// module/customer/module.go
+func NewCustomerModule(mCtx *module.ModuleContext) module.Module {
+ repo := repository.NewCustomerRepository(mCtx.DBCtx)
+ svc := service.NewCustomerService(repo)
+ hdl := handler.NewCustomerHandler(svc)
+
+ return &customerModule{
+  handler: hdl,
+ }
+}
+```
+
+**ขั้นตอนการสร้าง**
+
+- สร้าง Module Interface
+
+    > สร้างไฟล์ `util/module/module.go`
+    >
+
+    ```go
+    package module
+    
+    import (
+     "go-mma/util/storage/sqldb/transactor"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    type Module interface {
+     APIVersion() string
+     RegisterRoutes(r fiber.Router)
+    }
+    
+    type ModuleContext struct {
+     Transactor transactor.Transactor
+     DBCtx      transactor.DBTXContext
+    }
+    
+    func NewModuleContext(transactor transactor.Transactor, dbCtx transactor.DBTXContext) *ModuleContext {
+     return &ModuleContext{
+      Transactor: transactor,
+      DBCtx:      dbCtx,
+     }
+    }
+    ```
+
+- สร้าง Notification Module โดยใช้ Factory pattern
+
+    > สร้างไฟล์ `modules/notification/module.go`
+    >
+
+    ```go
+    package notification
+    
+    import (
+     "go-mma/util/module"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewModule(mCtx *module.ModuleContext) module.Module {
+     return &moduleImp{mCtx}
+    }
+    
+    type moduleImp struct {
+     mCtx *module.ModuleContext
+    }
+    
+    func (m *moduleImp) APIVersion() string {
+     return "v1"
+    }
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     // โมดูลนี้ยังไม่มี routes
+    }
+    ```
+
+- สร้าง Customer Module โดยใช้ Factory pattern และย้ายการ wiring component ต่าง ๆ (เช่น repository, service, handler) สำหรับ customer จาก `application/http.go` มาใส่ `RegisterRoutes()`
+
+    สร้างไฟล์ `modules/customer/module.go`
+
+    ```go
+    package customer
+    
+    import (
+     "go-mma/modules/customer/handler"
+     "go-mma/modules/customer/repository"
+     "go-mma/modules/customer/service"
+     "go-mma/util/module"
+    
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewModule(mCtx *module.ModuleContext) module.Module {
+     return &moduleImp{mCtx}
+    }
+    
+    type moduleImp struct {
+     mCtx *module.ModuleContext
+    }
+    
+    func (m *moduleImp) APIVersion() string {
+     return "v1"
+    }
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     // wiring dependencies
+     repo := repository.NewCustomerRepository(m.mCtx.DBCtx)
+     svcNoti := notiService.NewNotificationService()
+     svc := service.NewCustomerService(m.mCtx.Transactor, repo, svcNoti)
+     hdl := handler.NewCustomerHandler(svc)
+    
+     customers := router.Group("/customers")
+     customers.Post("", hdl.CreateCustomer)
+    }
+    ```
+
+- สร้าง Order Module โดยใช้ Factory pattern และย้ายการ wiring component ต่าง ๆ (เช่น repository, service, handler) สำหรับ order จาก `application/http.go` มาใส่ `RegisterRoutes()`
+
+    สร้างไฟล์ `modules/order/module.go`
+
+    ```go
+    package order
+    
+    import (
+     "go-mma/modules/order/handler"
+     "go-mma/modules/order/repository"
+     "go-mma/modules/order/service"
+     "go-mma/util/module"
+    
+     custRepository "go-mma/modules/customer/repository"
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewModule(mCtx *module.ModuleContext) module.Module {
+     return &moduleImp{mCtx}
+    }
+    
+    type moduleImp struct {
+     mCtx *module.ModuleContext
+    }
+    
+    func (m *moduleImp) APIVersion() string {
+     return "v1"
+    }
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     // wiring dependencies
+     repoCust := custRepository.NewCustomerRepository(m.mCtx.DBCtx)
+     repoOrder := repository.NewOrderRepository(m.mCtx.DBCtx)
+     svcNoti := notiService.NewNotificationService()
+     svc := service.NewOrderService(m.mCtx.Transactor, repoCust, repoOrder, svcNoti)
+     hdl := handler.NewOrderHandler(svc)
+    
+     orders := router.Group("/orders")
+     orders.Post("", hdl.CreateOrder)
+     orders.Delete("/:orderID", hdl.CancelOrder)
+    }
+    ```
+
+- ลบ `RegisterRoutes()` ใน `application/http.go` และเพิ่มเติมโค้ดตามนี้
+
+    ```go
+    type HTTPServer interface {
+     Start()
+     Shutdown() error
+     Group(prefix string) fiber.Router  // <-- ตรงนี้
+    }
+    
+    // ใช้สำหรับสร้าง base url router เช่น /api/v1
+    func (s *httpServer) Group(prefix string) fiber.Router {
+     return s.app.Group(prefix)
+    }
+    ```
+
+- ลบ `RegisterRoutes()` ใน `application/application.go` และเพิ่ม `RegisterModules()` เข้าไปแทน
+
+    ```go
+    func (app *Application) RegisterModules(modules ...module.Module) error {
+     for _, m := range modules {
+      app.registerModuleRoutes(m)
+     }
+    
+     return nil
+    }
+    
+    // แยกเป็นฟังก์ชันตาม single-responsibility principle (SRP)
+    func (app *Application) registerModuleRoutes(m module.Module) {
+     prefix := app.buildGroupPrefix(m)
+     group := app.httpServer.Group(prefix)
+     m.RegisterRoutes(group)
+    }
+    
+    func (app *Application) buildGroupPrefix(m module.Module) string {
+     apiBase := "/api"
+     version := m.APIVersion()
+     if version != "" {
+      return fmt.Sprintf("%s/%s", apiBase, version)
+     }
+     return apiBase
+    }
+    ```
+
+- ลบ `app.RegisterRoutes()` ใน `cmd/api/main.go` และเพิ่มโค้ดเพื่อสร้างโมดูล
+
+    ```go
+    package main
+    
+    import (
+     "fmt"
+     "go-mma/application"
+     "go-mma/config"
+     "go-mma/data/sqldb"
+     "go-mma/modules/customer"
+     "go-mma/modules/notification"
+     "go-mma/modules/order"
+     "go-mma/util/logger"
+     "go-mma/util/module"
+     "go-mma/util/transactor"
+     "os"
+     "os/signal"
+     "syscall"
+    )
+    
+    func main() {
+     // log
+     // config
+     // db
+    
+     app := application.New(*config, dbCtx)
+    
+     transactor, dbtxCtx := transactor.New(dbCtx.DB())
+     mCtx := module.NewModuleContext(transactor, dbtxCtx)
+     app.RegisterModules(
+      notification.NewModule(mCtx),
+      customer.NewModule(mCtx),
+      order.NewModule(mCtx),
+     )
+    
+     app.Run()
+    
+     // ...
+    }
+    ```
+
+## แยกความรับผิดชอบด้วยการซ่อนรายละเอียดของ Subdomain
+
+เพื่อให้ระบบของเราชัดเจนและจัดการง่าย เราควร **ซ่อนรายละเอียดภายในของแต่ละ subdomain** (เช่น `Customer`, `Order`, `Notification`) ไว้เบื้องหลัง **จุดเชื่อมต่อเดียว (Facade)**
+
+**Facade** ทำหน้าที่เหมือน "ประตูทางเข้า" ให้ module อื่นสามารถใช้งาน subdomain ได้ โดยไม่ต้องรู้ว่าเบื้องหลังมีโค้ดหรือโครงสร้างอะไรซับซ้อนบ้าง
+
+### ทำไมต้องซ่อน?
+
+- เพื่อให้ **แต่ละ module แยกกันอย่างชัดเจน** (Bounded Context)
+- ลดการ **พึ่งพาซึ่งกันและกันโดยตรง** ระหว่าง module
+- ทำให้การสื่อสารระหว่าง subdomain เป็นไปได้ง่าย และ **ไม่ต้องรู้โครงสร้างภายใน**
+
+<aside>
+💡
+
+**สรุปสั้น ๆ:** **Facade = ประตูทางเข้าเพียงจุดเดียว** ที่ให้ module อื่นใช้เรียก functionality ของ subdomain ได้ โดย **ไม่ต้องรู้รายละเอียดภายใน**
+
+</aside>
+
+### ตัวอย่างการใช้งาน
+
+ก่อน: ระบบเข้าถึงหลายชั้นโดยตรง
+
+```
+Order Handler
+     │
+     ▼
+Order Service
+     │
+     ├──────────────▶ Order Repository
+     │
+     └──────────────▶ Customer Repository
+```
+
+ตัวอย่าง
+
+```go
+// OrderService เรียก CustomerRepository ตรง ๆ
+customer, err := customerRepo.FindByID(ctx, order.CustomerID)
+if customer.Credit < order.Total {
+    return errors.New("insufficient credit")
+}
+```
+
+- `Order Service` เรียกทั้ง `OrderRepo` และ `CustomerRepo` โดยตรง
+
+หลัง: ใช้ Encapsulation
+
+```
+Order Handler
+     │
+     ▼
+Order Service
+     │
+     ├──────────────▶ Order Repository
+     │
+     └──────────────▶ Customer Service
+                             │
+                             └────────▶ Customer Repository
+
+```
+
+ตัวอย่าง
+
+```go
+// OrderService ใช้ CustomerFacade แทน
+ok, err := customerService.HasSufficientCredit(ctx, order.CustomerID, order.Total)
+if !ok {
+    return errors.New("insufficient credit")
+}
+```
+
+- `CustomerService`  เป็นจุดเดียวที่เปิดเผย logic ภายใน subdomain customer
+- ภายใน facade จะจัดการ repository, validation, business rule ทั้งหมดเอง
+
+### ซ่อนรายละเอียดภายในของ Customer
+
+ตอนนี้ใน OrderService มีการเรียกใช้ `model` และ `repository` ของโมดูล customer โดยตรง ถ้าจะซ่อนรายละเอียดภายใน ทำได้ ดังนี้
+
+- สร้าง DTO สำหรับส่งค่า customer กลับออกไปจาก CustomerService สำหรับการค้นหาลูกค้าจาก id
+
+    > สร้างไฟล์ `module/customer/dto/customer_info.go`
+    >
+
+    ```go
+    package dto
+    
+    type CustomerInfo struct {
+     ID     int64  `json:"id"`
+     Email  string `json:"email"`
+     Credit int    `json:"credit"`
+    }
+    
+    func NewCustomerInfo(id int64, email string, credit int) *CustomerInfo {
+     return &CustomerInfo{ID: id, Email: email, Credit: credit}
+    }
+    ```
+
+- เพื่อเพิ่มฟังก์ชันสำหรับการค้นหาจาก id
+
+    > แก้ไข `module/customer/service/customer.go`
+    >
+
+    ```go
+    var (
+     ErrEmailExists      = errs.ConflictError("email already exists")
+     ErrCustomerNotFound = errs.ResourceNotFoundError("the customer with given id was not found") // <-- ตรงนี้
+    )
+    
+    type CustomerService interface {
+     CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error)
+     GetCustomerByID(ctx context.Context, id int64) (*dto.CustomerInfo, error) // <-- ตรงนี้
+    }
+    
+    // ...
+    
+    // <-- ตรงนี้
+    func (s *customerService) GetCustomerByID(ctx context.Context, id int64) (*dto.CustomerInfo, error) {
+     customer, err := s.custRepo.FindByID(ctx, id)
+     if err != nil {
+      // error logging
+      logger.Log.Error(err.Error())
+      return nil, err
+     }
+    
+     if customer == nil {
+      return nil, ErrCustomerNotFound
+     }
+    
+     // สร้าง DTO Response
+     return dto.NewCustomerInfo(
+      customer.ID, 
+      customer.Email, 
+      customer.Credit), nil
+    }
+    ```
+
+- เพื่อเพิ่มฟังก์ชันสำหรับการตัดยอด และคืนยอด credit
+
+    > แก้ไข `module/customer/service/customer.go`
+    >
+
+    ```go
+    var (
+     ErrEmailExists                  = errs.ConflictError("email already exists")
+     ErrCustomerNotFound             = errs.ResourceNotFoundError("the customer with given id was not found")
+     ErrOrderTotalExceedsCreditLimit = errs.BusinessRuleError("order total exceeds credit limit") // <-- ตรงนี้
+    )
+    
+    type CustomerService interface {
+     // ...
+     // <-- ตรงนี้
+     ReserveCredit(ctx context.Context, id int64, amount int) error
+     ReleaseCredit(ctx context.Context, id int64, amount int) error
+    }
+    
+    // ...
+    
+    // <-- ตรงนี้
+    func (s *customerService) ReserveCredit(ctx context.Context, id int64, amount int) error {
+     err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+      customer, err := s.custRepo.FindByID(ctx, id)
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      if customer == nil {
+       return ErrCustomerNotFound
+      }
+    
+      if err := customer.ReserveCredit(amount); err != nil {
+       return ErrOrderTotalExceedsCreditLimit
+      }
+    
+      if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      return nil
+     })
+     return err
+    }
+    
+    func (s *customerService) ReleaseCredit(ctx context.Context, id int64, amount int) error {
+     err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+      customer, err := s.custRepo.FindByID(ctx, id)
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      if customer == nil {
+       return ErrCustomerNotFound
+      }
+    
+      customer.ReleaseCredit(amount)
+    
+      if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      return nil
+     })
+    
+     return err
+    }
+    ```
+
+### เรียกใช้ CustomerService ในโมดูล Order
+
+- ทำให้ `OrderService` เรียกใช้งาน `CustomerService` แทน `CustomerRepository`
+
+    > แก้ไข `module/order/service/order.go`
+    >
+
+    ```go
+    package service
+    
+    import (
+     "context"
+     "go-mma/modules/order/dto"
+     "go-mma/modules/order/model"
+     "go-mma/modules/order/repository"
+     "go-mma/util/errs"
+     "go-mma/util/logger"
+     "go-mma/util/transactor"
+    
+     custService "go-mma/modules/customer/service" // <-- ตรงนี้
+     notiService "go-mma/modules/notification/service"
+    )
+    
+    var (
+     ErrNoOrderID = errs.ResourceNotFoundError("the order with given id was not found") // <-- ตรงนี้ เหลือแค่ตัวเดียว
+    )
+    
+    // ...
+    
+    type orderService struct {
+     transactor transactor.Transactor
+     custSvc    custService.CustomerService // <-- ตรงนี้
+     orderRepo  repository.OrderRepository
+     notiSvc    notiService.NotificationService
+    }
+    
+    func NewOrderService(
+     transactor transactor.Transactor,
+     custSvc custService.CustomerService, // <-- ตรงนี้
+     orderRepo repository.OrderRepository,
+     notiSvc notiService.NotificationService) OrderService {
+     // ...
+    }
+    
+    func (s *orderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error) {
+     // Business Logic Rule: ตรวจสอบ customer id ในฐานข้อมูล
+     // <-- ตรงนี้
+     customer, err := s.custSvc.GetCustomerByID(ctx, req.CustomerID)
+     if err != nil {
+      return nil, err
+     }
+     // ...
+     // ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction
+     var order *model.Order
+     err = s.transactor.WithinTransaction(ctx, func(ctx context.Context) error {
+    
+      // ตัดยอด credit ในตาราง customer
+      // <-- ตรงนี้
+      if err := s.custSvc.ReserveCredit(ctx, customer.ID, req.OrderTotal); err != nil { 
+       return err
+      }
+    
+      // ...
+     })
+    
+     // ...
+    }
+    
+    func (s *orderService) CancelOrder(ctx context.Context, id int64) error {
+     // Business Logic Rule: ตรวจสอบ order id ในฐานข้อมูล
+     order, err := s.orderRepo.FindByID(ctx, id)
+     if err != nil {
+      logger.Log.Error(err.Error())
+      return err
+     }
+    
+     if order == nil {
+      return ErrNoOrderID
+     }
+    
+     err = s.transactor.WithinTransaction(ctx, func(ctx context.Context) error {
+    
+      // ยกเลิก order
+      if err := s.orderRepo.Cancel(ctx, order.ID); err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      // Business Logic: คืนยอด credit
+      // <-- ตรงนี้
+      err = s.custSvc.ReleaseCredit(ctx, order.CustomerID, order.OrderTotal)
+      if err != nil {
+       return err
+      }
+    
+      return nil
+     })
+    
+     return err
+    }
+    ```
+
+- ปรับใน `RegisterRoutes` ส่ง `CustomerService` ไปแทน `CustomerRepository`
+
+    > แก้ไข `module/order/module.go`
+    >
+
+    ```go
+    package order
+    
+    import (
+     "go-mma/modules/order/handler"
+     "go-mma/modules/order/repository"
+     "go-mma/modules/order/service"
+     "go-mma/util/module"
+    
+     custRepository "go-mma/modules/customer/repository"
+     custService "go-mma/modules/customer/service" // เพิ่มตรงนี้
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    // ...
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     // wiring dependencies
+     svcNoti := notiService.NewNotificationService()
+    
+     repoCust := custRepository.NewCustomerRepository(m.mCtx.DBCtx)
+     svcCust := custService.NewCustomerService(m.mCtx.Transactor, repoCust, svcNoti) // <-- เพิ่มตรงนี้
+    
+     repoOrder := repository.NewOrderRepository(m.mCtx.DBCtx)
+    
+      // ส่ง svcCust แทน repoCust
+     svc := service.NewOrderService(m.mCtx.Transactor, svcCust, repoOrder, svcNoti)
+     hdl := handler.NewOrderHandler(svc)
+    
+     orders := router.Group("/orders")
+     orders.Post("", hdl.CreateOrder)
+     orders.Delete("/:orderID", hdl.CancelOrder)
+    }
+    
+    ```
+
+### Nested Transactions
+
+เมื่อทดสอบรันโปรแกรมใหม่อีกครั้ง แล้วลองสร้างออเดอร์ใหม่ จะได้รับ error ว่า
+
+```go
+HTTP/1.1 500 Internal Server Error
+Date: Fri, 06 Jun 2025 03:50:32 GMT
+Content-Type: application/json
+Content-Length: 106
+X-Request-Id: 771c27c3-7528-4b93-bc6d-e1696c4727ae
+Connection: close
+
+{
+  "type": "operation_failed",
+  "message": "failed to begin transaction: nested transactions are not supported"
+}
+```
+
+เนื่องจากในฟังก์ชันการตัดยอด และคืนยอด credit ใน `CustomerService` นั้น มีการเปิดใช้งาน transaction ขึ้นมาใหม่ ซึ่งที่ถูกต้องจะต้องเป็น transaction เดียวกันที่ได้มาจาก `OrderService`
+
+ดังนั้น ตอนสร้าง `transactor` ใน `main.go` ต้องระบุว่าด้วยว่าให้มีการใช้งาน nested transactions
+
+```go
+// src/app/cmd/api/main.go
+
+func main() {
+ // ...
+
+ app := application.New(*config)
+
+ transactor, dbCtx := transactor.New(
+  db.DB(),
+  // <-- เพิ่มใช้งาน nested transaction strategy ที่ใช้ Savepoints
+  transactor.WithNestedTransactionStrategy(transactor.NestedTransactionsSavepoints))
+ mCtx := module.NewModuleContext(transactor, dbCtx)
+ 
+ // ...
+}
+```
+
+## จัดการ Service ใน Monolith ด้วย Service Registry
+
+ในระบบปัจจุบัน เรามักจะ **สร้าง service เดิมซ้ำ ๆ** ในแต่ละโมดูล เช่น สร้าง `NotificationService` ใหม่ในทั้ง `Customer` และ `Order` ทั้งที่ความจริงแล้วสามารถใช้ตัวเดียวกันได้
+
+เพื่อแก้ปัญหานี้ เราจะใช้แนวคิด **Service Registry** หรือ “คลังเก็บ service” ไว้รวม service ทั้งหมดในระบบไว้ที่เดียว
+
+### **ข้อดีของการใช้ Service Registry**
+
+- ไม่ต้องสร้าง service ซ้ำในหลายที่
+- ลดความซับซ้อนของการ inject dependency
+- ทำให้การจัดการ service เป็นระบบระเบียบมากขึ้น
+- รองรับการใช้ร่วมกันในหลายโมดูลง่ายขึ้น
+
+### สร้าง Service Registry
+
+Service Registry คือ struct หรือ container ที่ทำหน้าที่ **เก็บ instance ของ service ต่าง ๆ** ไว้ให้พร้อมใช้งานตลอดเวลา โดยไม่ต้อง new ซ้ำ
+
+- สร้าง Service Registry
+
+    > สร้างไฟล์ `util/registry/service_registry.go`
+    >
+
+    ```go
+    package registry
+    
+    import "fmt"
+    
+    // สำหรับกำหนด key ของ service ที่จะ export
+    type ServiceKey string
+    
+    // สำหรับ map key กับ service ที่จะ export
+    type ProvidedService struct {
+     Key   ServiceKey
+     Value any
+    }
+    
+    type ServiceRegistry interface {
+     Register(key ServiceKey, svc any)
+     Resolve(key ServiceKey) (any, error)
+    }
+    
+    type serviceRegistry struct {
+     services map[ServiceKey]any
+    }
+    
+    func NewServiceRegistry() ServiceRegistry {
+     return &serviceRegistry{
+      services: make(map[ServiceKey]any),
+     }
+    }
+    
+    func (r *serviceRegistry) Register(key ServiceKey, svc any) {
+     r.services[key] = svc
+    }
+    
+    func (r *serviceRegistry) Resolve(key ServiceKey) (any, error) {
+     svc, ok := r.services[key]
+     if !ok {
+      return nil, fmt.Errorf("service not found: %s", key)
+     }
+     return svc, nil
+    }
+    
+    ```
+
+- สร้างฟังก์ชันสำหรับช่วยแปลง Service กลับมาให้ถูกต้อง
+
+    > สร้างไฟล์ `util/registry/helper.go`
+    >
+
+    ```go
+    package registry
+    
+    import "fmt"
+    
+    func ResolveAs[T any](r ServiceRegistry, key ServiceKey) (T, error) {
+     var zero T
+     svc, err := r.Resolve(key)
+     if err != nil {
+      return zero, err
+     }
+     typedSvc, ok := svc.(T)
+     if !ok {
+      return zero, fmt.Errorf("service registered under key %s does not implement the expected type", key)
+     }
+     return typedSvc, nil
+    }
+    ```
+
+### แก้ไข Module Interface
+
+แก้ไขให้ Module มีฟังก์ชันสำหรับ เพิ่ม service ของตัวเองเข้า Registry
+
+> แก้ไขไฟล์ `util/module/module.go`
+>
+
+```go
+package module
+
+import (
+ "go-mma/util/registry"    // <-- ตรงนี้
+ "go-mma/util/transactor"
+
+ "github.com/gofiber/fiber/v3"
+)
+
+type Module interface {
+ APIVersion() string
+ Init(reg registry.ServiceRegistry) error // <-- ตรงนี้
+ RegisterRoutes(r fiber.Router)
+}
+
+// <-- ตรงนี้
+// แยกออกมาเพราะว่า บางโมดูลอาจไม่ต้อง export service
+type ServiceProvider interface {
+ Services() []registry.ProvidedService
+}
+```
+
+### แก้ไข Application
+
+แก้ไข Application ให้เป็นที่เก็บ service registry
+
+> แก้ไขไฟล์ `application/application.go`
+>
+
+```go
+package application
+
+import (
+ "fmt"
+ "go-mma/config"
+ "go-mma/data/sqldb"
+ "go-mma/util/logger"
+ "go-mma/util/module"
+ "go-mma/util/registry"  // <-- ตรงนี้
+)
+
+type Application struct {
+ config          config.Config
+ httpServer      HTTPServer
+ serviceRegistry registry.ServiceRegistry // <-- ตรงนี้
+}
+
+func New(config config.Config, db sqldb.DBContext) *Application {
+ return &Application{
+  config:          config,
+  httpServer:      newHTTPServer(config),
+  serviceRegistry: registry.NewServiceRegistry(), // <-- ตรงนี้
+ }
+}
+
+// ...
+
+func (app *Application) RegisterModules(modules ...module.Module) error {
+ for _, m := range modules {
+  // Initialize each module
+  if err := app.initModule(m); err != nil {
+   return fmt.Errorf("failed to init module [%T]: %w", m, err)
+  }
+
+  // ถ้าโมดูลเป็น ServiceProvider ให้เอา service มาลง registry
+  if sp, ok := m.(module.ServiceProvider); ok {
+   for _, p := range sp.Services() {
+    app.serviceRegistry.Register(p.Key, p.Value)
+   }
+  }
+
+  // Register routes for each module
+  app.registerModuleRoutes(m)
+ }
+
+ return nil
+}
+
+func (app *Application) initModule(m module.Module) error {
+ return m.Init(app.serviceRegistry)
+}
+
+// ...
+```
+
+### เพิ่มการ Initialize แต่ละโมดูล
+
+ปรับให้แต่ละโมดูลเพิ่ม `Init()` เพื่อสร้าง service ของตัวเอง
+
+- แก้ไขไฟล์ `modules/notification/module.go`
+
+    ```go
+    package notification
+    
+    import (
+     "go-mma/modules/notification/service"
+     "go-mma/util/module"
+     "go-mma/util/registry"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    const (
+     NotificationServiceKey registry.ServiceKey = "NotificationService"
+    )
+    
+    func NewModule(mCtx *module.ModuleContext) module.Module {
+     return &moduleImp{mCtx: mCtx}
+    }
+    
+    type moduleImp struct {
+     mCtx    *module.ModuleContext
+     notiSvc service.NotificationService
+    }
+    
+    func (m *moduleImp) APIVersion() string {
+     return "v1"
+    }
+    
+    func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+     m.notiSvc = service.NewNotificationService()
+    
+     return nil
+    }
+    
+    func (m *moduleImp) Services() []registry.ProvidedService {
+     return []registry.ProvidedService{
+      {Key: NotificationServiceKey, Value: m.notiSvc},
+     }
+    }
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     // โมดูลนี้ยังไม่มี routes
+    }
+    ```
+
+- แก้ไขไฟล์ `modules/customer/module.go`
+
+    ```go
+    package customer
+    
+    import (
+     "go-mma/modules/customer/handler"
+     "go-mma/modules/customer/repository"
+     "go-mma/modules/customer/service"
+     "go-mma/util/module"
+     "go-mma/util/registry"
+    
+     notiModule "go-mma/modules/notification"
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    const (
+     CustomerServiceKey registry.ServiceKey = "CustomerService"
+    )
+    
+    func NewModule(mCtx *module.ModuleContext) module.Module {
+     return &moduleImp{mCtx: mCtx}
+    }
+    
+    type moduleImp struct {
+     mCtx    *module.ModuleContext
+     custSvc service.CustomerService
+    }
+    
+    func (m *moduleImp) APIVersion() string {
+     return "v1"
+    }
+    
+    func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+     // Resolve NotificationService from the registry
+     notiSvc, err := registry.ResolveAs[notiService.NotificationService](reg, notiModule.NotificationServiceKey)
+     if err != nil {
+      return err
+     }
+    
+     repo := repository.NewCustomerRepository(m.mCtx.DBCtx)
+     m.custSvc = service.NewCustomerService(m.mCtx.Transactor, repo, notiSvc)
+    
+     return nil
+    }
+    
+    func (m *moduleImp) Services() []registry.ProvidedService {
+     return []registry.ProvidedService{
+      {Key: CustomerServiceKey, Value: m.custSvc},
+     }
+    }
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     // wiring dependencies
+     hdl := handler.NewCustomerHandler(m.custSvc)
+    
+     customers := router.Group("/customers")
+     customers.Post("", hdl.CreateCustomer)
+    }
+    ```
+
+    <aside>
+    💡
+
+    ทำไมถึงสร้าง handler ใน `RegisterRoutes`
+
+  - แยก concern ชัด: `RegisterRoutes` ดูแล “transport layer” ทั้งหมดในฟังก์ชันเดียว
+  - อ่านง่าย: เห็นเส้นทางและ handler คู่กันทันที
+  - ใช้ที่เดียว: ไม่มี state เพิ่มใน `moduleImp`
+    </aside>
+
+- แก้ไขไฟล์ `modules/order/module.go`
+
+    ```go
+    package order
+    
+    import (
+     "go-mma/modules/order/handler"
+     "go-mma/modules/order/repository"
+     "go-mma/modules/order/service"
+     "go-mma/util/module"
+     "go-mma/util/registry"
+    
+     custModule "go-mma/modules/customer"
+     custService "go-mma/modules/customer/service"
+     notiModule "go-mma/modules/notification"
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewModule(mCtx *module.ModuleContext) module.Module {
+     return &moduleImp{mCtx: mCtx}
+    }
+    
+    type moduleImp struct {
+     mCtx     *module.ModuleContext
+     orderSvc service.OrderService
+    }
+    
+    func (m *moduleImp) APIVersion() string {
+     return "v1"
+    }
+    
+    func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+     // Resolve CustomerService from the registry
+     custSvc, err := registry.ResolveAs[custService.CustomerService](reg, custModule.CustomerServiceKey)
+     if err != nil {
+      return err
+     }
+    
+     // Resolve NotificationService from the registry
+     notiSvc, err := registry.ResolveAs[notiService.NotificationService](reg, notiModule.NotificationServiceKey)
+     if err != nil {
+      return err
+     }
+    
+     repo := repository.NewOrderRepository(m.mCtx.DBCtx)
+     m.orderSvc = service.NewOrderService(m.mCtx.Transactor, custSvc, repo, notiSvc)
+    
+     return nil
+    }
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     // wiring dependencies
+     hdl := handler.NewOrderHandler(m.orderSvc)
+    
+     orders := router.Group("/orders")
+     orders.Post("", hdl.CreateOrder)
+     orders.Delete("/:orderID", hdl.CancelOrder)
+    }
+    ```
+
+## ป้องกันการเข้าถึงข้ามโมดูลด้วยโฟลเดอร์ `internal`
+
+หลังจากที่เรา แยกขอบเขตของแต่ละ sub-domain (Encapsulation) แล้ว ปัญหาที่ยังเหลือคือ โค้ดในโมดูล order ยังสามารถ `import` `model` หรือ `repository` ของโมดูล customer ได้โดยตรง นั่นทำให้ละเมิดขอบเขต (boundary) ของโดเมนและสร้างความพึ่งพา (coupling) ที่ไม่พึงประสงค์
+
+ในภาษา Go สามารถย้ายไฟล์ที่ “ห้ามภายนอกใช้” เข้าไปไว้ภายใต้โฟลเดอร์ **`internal`** ได้ ตัวคอมไพเลอร์จะบังคับไม่ให้ path นอกโฟลเดอร์แม่ (root) ของ `internal` ทำ `import` ได้เลย
+
+```go
+customer/
+├── internal/
+│   ├── model/        // โครงสร้างข้อมูลเฉพาะ customer
+│   └── repository/   // DB logic ของ customer
+└── service/          // business logic (export)
+```
+
+ถ้าโมดูลอื่น เช่น `order` พยายาม `import "go-mma/modules/customer/internal/repository"` จะขึ้นข้อความ error แบบนี้
+
+```go
+could not import go-mma/modules/customer/internal/repository (invalid use of internal package "go-mma/modules/customer/internal/repository")
+```
