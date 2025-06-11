@@ -46,7 +46,9 @@ func main() {
 
 	app := application.New(*config, dbCtx)
 
-	transactor, dbtxCtx := transactor.New(dbCtx.DB())
+	transactor, dbtxCtx := transactor.New(dbCtx.DB(),
+		// เพิ่มใช้งาน nested transaction strategy ที่ใช้ Savepoints
+		transactor.WithNestedTransactionStrategy(transactor.NestedTransactionsSavepoints))
 	mCtx := module.NewModuleContext(transactor, dbtxCtx)
 	app.RegisterModules(
 		notification.NewModule(mCtx),

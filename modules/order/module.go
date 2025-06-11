@@ -7,6 +7,7 @@ import (
 	"go-mma/util/module"
 
 	custRepository "go-mma/modules/customer/repository"
+	custService "go-mma/modules/customer/service"
 	notiService "go-mma/modules/notification/service"
 
 	"github.com/gofiber/fiber/v3"
@@ -26,10 +27,14 @@ func (m *moduleImp) APIVersion() string {
 
 func (m *moduleImp) RegisterRoutes(router fiber.Router) {
 	// wiring dependencies
-	repoCust := custRepository.NewCustomerRepository(m.mCtx.DBCtx)
-	repoOrder := repository.NewOrderRepository(m.mCtx.DBCtx)
 	svcNoti := notiService.NewNotificationService()
-	svc := service.NewOrderService(m.mCtx.Transactor, repoCust, repoOrder, svcNoti)
+
+	repoCust := custRepository.NewCustomerRepository(m.mCtx.DBCtx)
+	svcCust := custService.NewCustomerService(m.mCtx.Transactor, repoCust, svcNoti)
+
+	repoOrder := repository.NewOrderRepository(m.mCtx.DBCtx)
+
+	svc := service.NewOrderService(m.mCtx.Transactor, svcCust, repoOrder, svcNoti)
 	hdl := handler.NewOrderHandler(svc)
 
 	orders := router.Group("/orders")

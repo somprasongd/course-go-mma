@@ -9,14 +9,12 @@ import (
 	"go-mma/util/logger"
 	"go-mma/util/storage/sqldb/transactor"
 
-	custRepository "go-mma/modules/customer/repository"
+	custService "go-mma/modules/customer/service"
 	notiService "go-mma/modules/notification/service"
 )
 
 var (
-	ErrTotalOrderValue = errs.BusinessRuleError("order_total must be greater than 0")
-	ErrNoCustomerID    = errs.ResourceNotFoundError("the customer with given id was not found")
-	ErrNoOrderID       = errs.ResourceNotFoundError("the order with given id was not found")
+	ErrNoOrderID = errs.ResourceNotFoundError("the order with given id was not found")
 )
 
 type OrderService interface {
@@ -26,44 +24,29 @@ type OrderService interface {
 
 type orderService struct {
 	transactor transactor.Transactor
-	custRepo   custRepository.CustomerRepository
+	custSvc    custService.CustomerService
 	orderRepo  repository.OrderRepository
 	notiSvc    notiService.NotificationService
 }
 
 func NewOrderService(
 	transactor transactor.Transactor,
-	custRepo custRepository.CustomerRepository,
+	custSvc custService.CustomerService,
 	orderRepo repository.OrderRepository,
 	notiSvc notiService.NotificationService,
 ) OrderService {
 	return &orderService{
 		transactor: transactor,
-		custRepo:   custRepo,
+		custSvc:    custSvc,
 		orderRepo:  orderRepo,
 		notiSvc:    notiSvc,
 	}
 }
 
 func (s *orderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error) {
-	// Business Logic Rule: ตรวจสอบ ยอดรวมต้องมากกว่า 0
-	if req.OrderTotal <= 0 {
-		return nil, ErrTotalOrderValue
-	}
-
-	// Business Logic Rule: ตรวจสอบ customer id
-	customer, err := s.custRepo.FindByID(ctx, req.CustomerID)
+	// Business Logic Rule: ตรวจสอบ customer id ในฐานข้อมูล
+	customer, err := s.custSvc.GetCustomerByID(ctx, req.CustomerID)
 	if err != nil {
-		logger.Log.Error(err.Error())
-		return nil, err
-	}
-
-	if customer == nil {
-		return nil, ErrNoCustomerID
-	}
-
-	// Business Logic Rule: ตัดยอด credit ถ้าไม่พอให้ error
-	if err := customer.ReserveCredit(req.OrderTotal); err != nil {
 		return nil, err
 	}
 
@@ -71,8 +54,7 @@ func (s *orderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequ
 	var order *model.Order
 	err = s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
 		// ตัดยอด credit ในตาราง customer
-		if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
-			logger.Log.Error(err.Error())
+		if err := s.custSvc.ReserveCredit(ctx, customer.ID, req.OrderTotal); err != nil {
 			return err
 		}
 
@@ -125,22 +107,8 @@ func (s *orderService) CancelOrder(ctx context.Context, id int64) error {
 	}
 
 	// Business Logic Rule: ตรวจสอบ customer id
-	customer, err := s.custRepo.FindByID(ctx, order.CustomerID)
+	err = s.custSvc.ReleaseCredit(ctx, order.CustomerID, order.OrderTotal)
 	if err != nil {
-		logger.Log.Error(err.Error())
-		return err
-	}
-
-	if customer == nil {
-		return ErrNoCustomerID
-	}
-
-	// Business Logic: คืนยอด credit
-	customer.ReleaseCredit(order.OrderTotal)
-
-	// บันทึกการคืนยอด credit
-	if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
-		logger.Log.Error(err.Error())
 		return err
 	}
 

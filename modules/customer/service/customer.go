@@ -13,12 +13,16 @@ import (
 )
 
 var (
-	ErrCreditValue = errs.BusinessRuleError("credit must be greater than 0")
-	ErrEmailExists = errs.ConflictError("email already exists")
+	ErrEmailExists                  = errs.ConflictError("email already exists")
+	ErrCustomerNotFound             = errs.ResourceNotFoundError("the customer with given id was not found")
+	ErrOrderTotalExceedsCreditLimit = errs.BusinessRuleError("order total exceeds credit limit")
 )
 
 type CustomerService interface {
 	CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error)
+	GetCustomerByID(ctx context.Context, id int64) (*dto.CustomerInfo, error)
+	ReserveCredit(ctx context.Context, id int64, amount int) error
+	ReleaseCredit(ctx context.Context, id int64, amount int) error
 }
 
 type customerService struct {
@@ -41,12 +45,7 @@ func NewCustomerService(
 
 func (s *customerService) CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error) {
 	// ตรวจสอบเงื่อนไขของ business rules
-	// Rule 1: credit ต้องมากกว่า 0
-	if req.Credit <= 0 {
-		return nil, ErrCreditValue
-	}
-
-	// Rule 2: ตรวจสอบ email ต้องไม่ซ้ำ
+	// Rule: ตรวจสอบ email ต้องไม่ซ้ำ
 	exists, err := s.custRepo.ExistsByEmail(ctx, req.Email)
 	if err != nil {
 		// error logging
@@ -89,4 +88,71 @@ func (s *customerService) CreateCustomer(ctx context.Context, req *dto.CreateCus
 	resp := dto.NewCreateCustomerResponse(customer.ID)
 
 	return resp, nil
+}
+
+func (s *customerService) GetCustomerByID(ctx context.Context, id int64) (*dto.CustomerInfo, error) {
+	customer, err := s.custRepo.FindByID(ctx, id)
+	if err != nil {
+		// error logging
+		logger.Log.Error(err.Error())
+		return nil, err
+	}
+
+	if customer == nil {
+		return nil, ErrCustomerNotFound
+	}
+
+	// สร้าง DTO Response
+	return dto.NewCustomerInfo(customer.ID, customer.Email, customer.Credit), nil
+}
+
+func (s *customerService) ReserveCredit(ctx context.Context, id int64, amount int) error {
+	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+		customer, err := s.custRepo.FindByID(ctx, id)
+		if err != nil {
+			logger.Log.Error(err.Error())
+			return err
+		}
+
+		if customer == nil {
+			return ErrCustomerNotFound
+		}
+
+		if err := customer.ReserveCredit(amount); err != nil {
+			return ErrOrderTotalExceedsCreditLimit
+		}
+
+		if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
+			logger.Log.Error(err.Error())
+			return err
+		}
+
+		return nil
+	})
+	return err
+}
+
+func (s *customerService) ReleaseCredit(ctx context.Context, id int64, amount int) error {
+	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+		customer, err := s.custRepo.FindByID(ctx, id)
+		if err != nil {
+			logger.Log.Error(err.Error())
+			return err
+		}
+
+		if customer == nil {
+			return ErrCustomerNotFound
+		}
+
+		customer.ReleaseCredit(amount)
+
+		if err := s.custRepo.UpdateCredit(ctx, customer); err != nil {
+			logger.Log.Error(err.Error())
+			return err
+		}
+
+		return nil
+	})
+
+	return err
 }
