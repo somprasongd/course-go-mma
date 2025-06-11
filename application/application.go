@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go-mma/config"
 	"go-mma/util/logger"
+	"go-mma/util/module"
 	"go-mma/util/storage/sqldb"
 )
 
@@ -38,6 +39,26 @@ func (app *Application) Shutdown() error {
 	return nil
 }
 
-func (app *Application) RegisterRoutes() {
-	app.httpServer.RegisterRoutes(app.dbCtx)
+func (app *Application) RegisterModules(modules ...module.Module) error {
+	for _, m := range modules {
+		app.registerModuleRoutes(m)
+	}
+
+	return nil
+}
+
+// แยกเป็นฟังก์ชันตาม single-responsibility principle (SRP)
+func (app *Application) registerModuleRoutes(m module.Module) {
+	prefix := app.buildGroupPrefix(m)
+	group := app.httpServer.Group(prefix)
+	m.RegisterRoutes(group)
+}
+
+func (app *Application) buildGroupPrefix(m module.Module) string {
+	apiBase := "/api"
+	version := m.APIVersion()
+	if version != "" {
+		return fmt.Sprintf("%s/%s", apiBase, version)
+	}
+	return apiBase
 }

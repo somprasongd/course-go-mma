@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
-	"go-mma/dto"
-	"go-mma/model"
-	"go-mma/repository"
+	"go-mma/modules/customer/dto"
+	"go-mma/modules/customer/model"
+	"go-mma/modules/customer/repository"
 	"go-mma/util/errs"
 	"go-mma/util/logger"
 	"go-mma/util/storage/sqldb/transactor"
+
+	notiService "go-mma/modules/notification/service"
 )
 
 var (
@@ -15,31 +17,28 @@ var (
 	ErrEmailExists = errs.ConflictError("email already exists")
 )
 
-// --> Step 1: สร้าง interface
 type CustomerService interface {
 	CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error)
 }
 
-// --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 type customerService struct {
 	transactor transactor.Transactor
-	custRepo   repository.CustomerRepository // --> step 3: เปลี่ยนจาก pointer เป็น interface
-	notiSvc    NotificationService           // --> step 4: เปลี่ยนจาก pointer เป็น interface
+	custRepo   repository.CustomerRepository
+	notiSvc    notiService.NotificationService
 }
 
 func NewCustomerService(
 	transactor transactor.Transactor,
-	custRepo repository.CustomerRepository, // --> step 5: เปลี่ยนจาก pointer เป็น interface
-	notiSvc NotificationService, // --> step 6: เปลี่ยนจาก pointer เป็น interface
-) CustomerService { // --> Step 7: return เป็น interface
-	return &customerService{ // --> Step 8: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+	custRepo repository.CustomerRepository,
+	notiSvc notiService.NotificationService,
+) CustomerService {
+	return &customerService{
 		transactor: transactor,
 		custRepo:   custRepo,
 		notiSvc:    notiSvc,
 	}
 }
 
-// --> Step 9: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 func (s *customerService) CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error) {
 	// ตรวจสอบเงื่อนไขของ business rules
 	// Rule 1: credit ต้องมากกว่า 0

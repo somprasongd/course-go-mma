@@ -6,12 +6,7 @@ import (
 	"go-mma/application/middleware"
 	"go-mma/build"
 	"go-mma/config"
-	"go-mma/handler"
-	"go-mma/repository"
-	"go-mma/service"
 	"go-mma/util/logger"
-	"go-mma/util/storage/sqldb"
-	"go-mma/util/storage/sqldb/transactor"
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
@@ -23,7 +18,7 @@ import (
 type HTTPServer interface {
 	Start()
 	Shutdown() error
-	RegisterRoutes(dbCtx sqldb.DBContext)
+	Group(prefix string) fiber.Router
 }
 
 type httpServer struct {
@@ -72,33 +67,7 @@ func (s *httpServer) Shutdown() error {
 	return s.app.ShutdownWithContext(ctx)
 }
 
-func (s *httpServer) RegisterRoutes(dbCtx sqldb.DBContext) {
-	v1 := s.app.Group("/api/v1")
-
-	// สร้าง transactor กับ dbCtx จาก transactor
-	transactor, dbtxCtx := transactor.New(dbCtx.DB())
-
-	customers := v1.Group("/customers")
-	{
-		// กำหนด dependency ระหว่างเลเยอร์
-		repo := repository.NewCustomerRepository(dbtxCtx)
-		svcNoti := service.NewNotificationService()
-		// ส่ง instance ของ repository, notiSvc เข้า service
-		svc := service.NewCustomerService(transactor, repo, svcNoti)
-		// ส่ง service เข้า handler
-		hdlr := handler.NewCustomerHandler(svc)
-		// Register routes เข้ากับ HTTP server
-		customers.Post("", hdlr.CreateCustomer)
-	}
-
-	orders := v1.Group("/orders")
-	{
-		repoCust := repository.NewCustomerRepository(dbtxCtx)
-		repoOrder := repository.NewOrderRepository(dbtxCtx)
-		svcNoti := service.NewNotificationService()
-		svcOrder := service.NewOrderService(transactor, repoCust, repoOrder, svcNoti)
-		hdlr := handler.NewOrderHandler(svcOrder)
-		orders.Post("", hdlr.CreateOrder)
-		orders.Delete("/:orderID", hdlr.CancelOrder)
-	}
+// ใช้สำหรับสร้าง base url router เช่น /api/v1
+func (s *httpServer) Group(prefix string) fiber.Router {
+	return s.app.Group(prefix)
 }

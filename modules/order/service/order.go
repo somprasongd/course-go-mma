@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
-	"go-mma/dto"
-	"go-mma/model"
-	"go-mma/repository"
+	"go-mma/modules/order/dto"
+	"go-mma/modules/order/model"
+	"go-mma/modules/order/repository"
 	"go-mma/util/errs"
 	"go-mma/util/logger"
 	"go-mma/util/storage/sqldb/transactor"
+
+	custRepository "go-mma/modules/customer/repository"
+	notiService "go-mma/modules/notification/service"
 )
 
 var (
@@ -16,27 +19,25 @@ var (
 	ErrNoOrderID       = errs.ResourceNotFoundError("the order with given id was not found")
 )
 
-// --> Step 1: สร้าง interface
 type OrderService interface {
 	CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error)
 	CancelOrder(ctx context.Context, id int64) error
 }
 
-// --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 type orderService struct {
 	transactor transactor.Transactor
-	custRepo   repository.CustomerRepository // --> step 3: เปลี่ยนจาก pointer เป็น interface
-	orderRepo  repository.OrderRepository    // --> step 4: เปลี่ยนจาก pointer เป็น interface
-	notiSvc    NotificationService           // --> step 5: เปลี่ยนจาก pointer เป็น interface
+	custRepo   custRepository.CustomerRepository
+	orderRepo  repository.OrderRepository
+	notiSvc    notiService.NotificationService
 }
 
 func NewOrderService(
 	transactor transactor.Transactor,
-	custRepo repository.CustomerRepository, // --> step 6: เปลี่ยนจาก pointer เป็น interface
-	orderRepo repository.OrderRepository, // --> step 7: เปลี่ยนจาก pointer เป็น interface
-	notiSvc NotificationService, // --> step 8: เปลี่ยนจาก pointer เป็น interface
-) OrderService { // --> Step 9: return เป็น interface
-	return &orderService{ // --> Step 10: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
+	custRepo custRepository.CustomerRepository,
+	orderRepo repository.OrderRepository,
+	notiSvc notiService.NotificationService,
+) OrderService {
+	return &orderService{
 		transactor: transactor,
 		custRepo:   custRepo,
 		orderRepo:  orderRepo,
@@ -44,7 +45,6 @@ func NewOrderService(
 	}
 }
 
-// --> Step 11: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 func (s *orderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error) {
 	// Business Logic Rule: ตรวจสอบ ยอดรวมต้องมากกว่า 0
 	if req.OrderTotal <= 0 {
@@ -106,7 +106,6 @@ func (s *orderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequ
 	return resp, nil
 }
 
-// --> Step 12: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 func (s *orderService) CancelOrder(ctx context.Context, id int64) error {
 	// Business Logic Rule: ตรวจสอบ order id
 	order, err := s.orderRepo.FindByID(ctx, id)

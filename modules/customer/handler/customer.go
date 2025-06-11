@@ -2,8 +2,8 @@ package handler
 
 import (
 	"fmt"
-	"go-mma/dto"
-	"go-mma/service"
+	"go-mma/modules/customer/dto"
+	"go-mma/modules/customer/service"
 	"go-mma/util/errs"
 	"go-mma/util/logger"
 

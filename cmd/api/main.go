@@ -8,8 +8,13 @@ import (
 
 	"go-mma/application"
 	"go-mma/config"
+	"go-mma/modules/customer"
+	"go-mma/modules/notification"
+	"go-mma/modules/order"
 	"go-mma/util/logger"
+	"go-mma/util/module"
 	"go-mma/util/storage/sqldb"
+	"go-mma/util/storage/sqldb/transactor"
 )
 
 var (
@@ -40,7 +45,15 @@ func main() {
 	}()
 
 	app := application.New(*config, dbCtx)
-	app.RegisterRoutes()
+
+	transactor, dbtxCtx := transactor.New(dbCtx.DB())
+	mCtx := module.NewModuleContext(transactor, dbtxCtx)
+	app.RegisterModules(
+		notification.NewModule(mCtx),
+		customer.NewModule(mCtx),
+		order.NewModule(mCtx),
+	)
+
 	app.Run()
 
 	// รอสัญญาณการปิด
