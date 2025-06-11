@@ -44,7 +44,7 @@ func main() {
 		}
 	}()
 
-	app := application.New(*config, dbCtx)
+	app := application.New(*config)
 
 	transactor, dbtxCtx := transactor.New(dbCtx.DB(),
 		// เพิ่มใช้งาน nested transaction strategy ที่ใช้ Savepoints

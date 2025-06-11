@@ -5,20 +5,20 @@ import (
 	"go-mma/config"
 	"go-mma/util/logger"
 	"go-mma/util/module"
-	"go-mma/util/storage/sqldb"
+	"go-mma/util/registry"
 )
 
 type Application struct {
-	config     config.Config
-	httpServer HTTPServer
-	dbCtx      sqldb.DBContext
+	config          config.Config
+	httpServer      HTTPServer
+	serviceRegistry registry.ServiceRegistry
 }
 
-func New(config config.Config, dbCtx sqldb.DBContext) *Application {
+func New(config config.Config) *Application {
 	return &Application{
-		config:     config,
-		httpServer: newHTTPServer(config),
-		dbCtx:      dbCtx,
+		config:          config,
+		httpServer:      newHTTPServer(config),
+		serviceRegistry: registry.NewServiceRegistry(),
 	}
 }
 
@@ -41,6 +41,18 @@ func (app *Application) Shutdown() error {
 
 func (app *Application) RegisterModules(modules ...module.Module) error {
 	for _, m := range modules {
+		// Initialize each module
+		if err := app.initModule(m); err != nil {
+			return fmt.Errorf("failed to init module [%T]: %w", m, err)
+		}
+
+		// ถ้าโมดูลเป็น ServiceProvider ให้เอา service มาลง registry
+		if sp, ok := m.(module.ServiceProvider); ok {
+			for _, p := range sp.Services() {
+				app.serviceRegistry.Register(p.Key, p.Value)
+			}
+		}
+
 		app.registerModuleRoutes(m)
 	}
 
@@ -48,6 +60,10 @@ func (app *Application) RegisterModules(modules ...module.Module) error {
 }
 
 // แยกเป็นฟังก์ชันตาม single-responsibility principle (SRP)
+func (app *Application) initModule(m module.Module) error {
+	return m.Init(app.serviceRegistry)
+}
+
 func (app *Application) registerModuleRoutes(m module.Module) {
 	prefix := app.buildGroupPrefix(m)
 	group := app.httpServer.Group(prefix)

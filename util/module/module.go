@@ -1,6 +1,7 @@
 package module
 
 import (
+	"go-mma/util/registry"
 	"go-mma/util/storage/sqldb/transactor"
 
 	"github.com/gofiber/fiber/v3"
@@ -8,7 +9,13 @@ import (
 
 type Module interface {
 	APIVersion() string
+	Init(reg registry.ServiceRegistry) error
 	RegisterRoutes(r fiber.Router)
+}
+
+// แยกออกมาเพราะว่า บางโมดูลอาจไม่ต้อง export service
+type ServiceProvider interface {
+	Services() []registry.ProvidedService
 }
 
 type ModuleContext struct {
