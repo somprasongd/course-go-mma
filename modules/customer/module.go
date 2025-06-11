@@ -2,7 +2,7 @@ package customer
 
 import (
 	"go-mma/modules/customer/handler"
-	"go-mma/modules/customer/repository"
+	"go-mma/modules/customer/internal/repository"
 	"go-mma/modules/customer/service"
 	"go-mma/util/module"
 	"go-mma/util/registry"

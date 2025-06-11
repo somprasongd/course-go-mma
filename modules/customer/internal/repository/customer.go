@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"go-mma/modules/customer/model"
+	"go-mma/modules/customer/internal/model"
 	"go-mma/util/errs"
 	"go-mma/util/storage/sqldb/transactor"
 	"time"

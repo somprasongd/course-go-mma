@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"go-mma/modules/customer/dto"
-	"go-mma/modules/customer/model"
-	"go-mma/modules/customer/repository"
+	"go-mma/modules/customer/internal/model"
+	"go-mma/modules/customer/internal/repository"
 	"go-mma/util/errs"
 	"go-mma/util/logger"
 	"go-mma/util/storage/sqldb/transactor"

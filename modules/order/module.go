@@ -2,7 +2,7 @@ package order
 
 import (
 	"go-mma/modules/order/handler"
-	"go-mma/modules/order/repository"
+	"go-mma/modules/order/internal/repository"
 	"go-mma/modules/order/service"
 	"go-mma/util/module"
 	"go-mma/util/registry"
