@@ -4,9 +4,12 @@ go 1.24.4
 
 replace go-mma/shared/common v0.0.0 => ../../shared/common
 
+replace go-mma/shared/messaging v0.0.0 => ../../shared/messaging
+
 require (
 	github.com/gofiber/fiber/v3 v3.0.0-beta.4
 	go-mma/shared/common v0.0.0
+	go-mma/shared/messaging v0.0.0
 )
 
 require (

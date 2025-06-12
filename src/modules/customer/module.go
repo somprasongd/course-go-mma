@@ -9,12 +9,10 @@ import (
 	reservecredit "go-mma/modules/customer/internal/feature/reserve-credit"
 	"go-mma/modules/customer/internal/repository"
 	"go-mma/shared/common/domain"
+	"go-mma/shared/common/eventbus"
 	"go-mma/shared/common/mediator"
 	"go-mma/shared/common/module"
 	"go-mma/shared/common/registry"
-
-	notiModule "go-mma/modules/notification"
-	notiService "go-mma/modules/notification/service"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -32,25 +30,15 @@ func (m *moduleImp) APIVersion() string {
 	return "v1"
 }
 
-func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
-	// Resolve NotificationService from the registry
-	notiSvc, err := registry.ResolveAs[notiService.NotificationService](reg, notiModule.NotificationServiceKey)
-	if err != nil {
-		return err
-	}
+func (m *moduleImp) Init(reg registry.ServiceRegistry, eventBus eventbus.EventBus) error {
+	// เอา notiSvc ออก
 
-	// สร้าง Domain Event Dispatcher สำหรับโมดูลนี้โดยเฉพาะ
-	// เราจะไม่ใช้ dispatcher กลาง แต่จะสร้าง dispatcher แยกในแต่ละโมดูลแทน
-	// เพื่อให้โมดูลนั้นๆ ควบคุมการลงทะเบียนและการจัดการ event handler ได้เองอย่างอิสระ
+	// Register domain event handler
 	dispatcher := domain.NewSimpleDomainEventDispatcher()
-
-	// ลงทะเบียน handler สำหรับ event CustomerCreatedDomainEventType ใน dispatcher ของโมดูลนี้
-	dispatcher.Register(event.CustomerCreatedDomainEventType, eventhandler.NewCustomerCreatedDomainEventHandler(notiSvc))
+	dispatcher.Register(event.CustomerCreatedDomainEventType, eventhandler.NewCustomerCreatedDomainEventHandler(eventBus)) // ส่ง eventBus เข้าไปแทน
 
 	repo := repository.NewCustomerRepository(m.mCtx.DBCtx)
 
-	// ลงทะเบียน command handler และส่ง dispatcher เข้าไปใน handler ด้วย
-	// เพื่อให้ handler สามารถ dispatch event ผ่าน dispatcher ของโมดูลนี้ได้
 	mediator.Register(create.NewCreateCustomerCommandHandler(m.mCtx.Transactor, repo, dispatcher))
 	mediator.Register(getbyid.NewGetCustomerByIDQueryHandler(repo))
 	mediator.Register(reservecredit.NewReserveCreditCommandHandler(m.mCtx.Transactor, repo))
@@ -58,8 +46,6 @@ func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
 
 	return nil
 }
-
-// ลบ Services() []registry.ProvidedService ออก
 
 func (m *moduleImp) RegisterRoutes(router fiber.Router) {
 	customers := router.Group("/customers")
