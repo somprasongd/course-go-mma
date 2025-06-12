@@ -31,7 +31,7 @@ func NewCustomerRepository(dbCtx transactor.DBTXContext) CustomerRepository {
 
 func (r *customerRepository) Create(ctx context.Context, customer *model.Customer) error {
 	query := `
-	INSERT INTO public.customers (id, email, credit)
+	INSERT INTO customer.customers (id, email, credit)
 	VALUES ($1, $2, $3)
 	RETURNING *
 	`
@@ -50,7 +50,7 @@ func (r *customerRepository) Create(ctx context.Context, customer *model.Custome
 }
 
 func (r *customerRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	query := `SELECT 1 FROM public.customers WHERE email = $1 LIMIT 1`
+	query := `SELECT 1 FROM customer.customers WHERE email = $1 LIMIT 1`
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -71,7 +71,7 @@ func (r *customerRepository) ExistsByEmail(ctx context.Context, email string) (b
 func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
 	query := `
 	SELECT *
-	FROM public.customers
+	FROM customer.customers
 	WHERE id = $1
 `
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -91,7 +91,7 @@ func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Cus
 
 func (r *customerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
 	query := `
-	UPDATE public.customers
+	UPDATE customer.customers
 	SET credit = $2
 	WHERE id = $1
 	RETURNING *

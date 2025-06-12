@@ -30,7 +30,7 @@ func NewOrderRepository(dbCtx transactor.DBTXContext) OrderRepository {
 
 func (r *orderRepository) Create(ctx context.Context, m *model.Order) error {
 	query := `
-	INSERT INTO public.orders (
+	INSERT INTO sales.orders (
 			id, customer_id, order_total
 	)
 	VALUES ($1, $2, $3)
@@ -50,7 +50,7 @@ func (r *orderRepository) Create(ctx context.Context, m *model.Order) error {
 func (r *orderRepository) FindByID(ctx context.Context, id int64) (*model.Order, error) {
 	query := `
 	SELECT *
-	FROM public.orders
+	FROM sales.orders
 	WHERE id = $1
 	AND canceled_at IS NULL -- รายออเดอร์ต้องยังไม่ถูกยกเลิก
 `
@@ -70,7 +70,7 @@ func (r *orderRepository) FindByID(ctx context.Context, id int64) (*model.Order,
 
 func (r *orderRepository) Cancel(ctx context.Context, id int64) error {
 	query := `
-	UPDATE public.orders
+	UPDATE sales.orders
 	SET canceled_at = current_timestamp -- soft delete record
 	WHERE id = $1
 `
