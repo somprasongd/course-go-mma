@@ -1,0 +1,23 @@
+{
+  "folders": [
+    {
+      "path": "."
+    },
+    {
+      "path": "src/app"
+    },
+    {
+      "path": "src/modules/customer"
+    },
+    {
+      "path": "src/modules/order"
+    },
+    {
+      "path": "src/modules/notification"
+    },
+    {
+      "path": "src/shared/common"
+    }
+  ],
+  "settings": {}
+}
