@@ -10,6 +10,9 @@
       "path": "src/modules/customer"
     },
     {
+      "path": "src/shared/contract/customercontract"
+    },
+    {
       "path": "src/modules/order"
     },
     {

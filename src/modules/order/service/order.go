@@ -8,8 +8,8 @@ import (
 	"go-mma/shared/common/errs"
 	"go-mma/shared/common/logger"
 	"go-mma/shared/common/storage/sqldb/transactor"
+	"go-mma/shared/contract/customercontract" // <-- ตรงนี้
 
-	custService "go-mma/modules/customer/service"
 	notiService "go-mma/modules/notification/service"
 )
 
@@ -24,17 +24,16 @@ type OrderService interface {
 
 type orderService struct {
 	transactor transactor.Transactor
-	custSvc    custService.CustomerService
+	custSvc    customercontract.CreditManager // <-- ตรงนี้
 	orderRepo  repository.OrderRepository
 	notiSvc    notiService.NotificationService
 }
 
 func NewOrderService(
 	transactor transactor.Transactor,
-	custSvc custService.CustomerService,
+	custSvc customercontract.CreditManager, // <-- ตรงนี้
 	orderRepo repository.OrderRepository,
-	notiSvc notiService.NotificationService,
-) OrderService {
+	notiSvc notiService.NotificationService) OrderService {
 	return &orderService{
 		transactor: transactor,
 		custSvc:    custSvc,
@@ -42,6 +41,8 @@ func NewOrderService(
 		notiSvc:    notiSvc,
 	}
 }
+
+// ...
 
 func (s *orderService) CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error) {
 	// Business Logic Rule: ตรวจสอบ customer id ในฐานข้อมูล

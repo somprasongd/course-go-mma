@@ -6,15 +6,12 @@ import (
 	"go-mma/modules/customer/service"
 	"go-mma/shared/common/module"
 	"go-mma/shared/common/registry"
+	"go-mma/shared/contract/customercontract"
 
 	notiModule "go-mma/modules/notification"
 	notiService "go-mma/modules/notification/service"
 
 	"github.com/gofiber/fiber/v3"
-)
-
-const (
-	CustomerServiceKey registry.ServiceKey = "CustomerService"
 )
 
 func NewModule(mCtx *module.ModuleContext) module.Module {
@@ -45,7 +42,7 @@ func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
 
 func (m *moduleImp) Services() []registry.ProvidedService {
 	return []registry.ProvidedService{
-		{Key: CustomerServiceKey, Value: m.custSvc},
+		{Key: customercontract.CreditManagerKey, Value: m.custSvc},
 	}
 }
 

@@ -6,9 +6,8 @@ import (
 	"go-mma/modules/order/service"
 	"go-mma/shared/common/module"
 	"go-mma/shared/common/registry"
+	"go-mma/shared/contract/customercontract"
 
-	custModule "go-mma/modules/customer"
-	custService "go-mma/modules/customer/service"
 	notiModule "go-mma/modules/notification"
 	notiService "go-mma/modules/notification/service"
 
@@ -29,8 +28,8 @@ func (m *moduleImp) APIVersion() string {
 }
 
 func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
-	// Resolve CustomerService from the registry
-	custSvc, err := registry.ResolveAs[custService.CustomerService](reg, custModule.CustomerServiceKey)
+	// Resolve CustomerService as CreditManagerKey from the registry
+	custSvc, err := registry.ResolveAs[customercontract.CreditManager](reg, customercontract.CreditManagerKey)
 	if err != nil {
 		return err
 	}

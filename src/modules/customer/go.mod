@@ -6,10 +6,13 @@ replace go-mma/shared/common v0.0.0 => ../../shared/common
 
 replace go-mma/modules/notification v0.0.0 => ../../modules/notification
 
+replace go-mma/shared/contract/customercontract v0.0.0 => ../../shared/contract/customercontract
+
 require (
 	github.com/gofiber/fiber/v3 v3.0.0-beta.4
 	go-mma/modules/notification v0.0.0
 	go-mma/shared/common v0.0.0
+	go-mma/shared/contract/customercontract v0.0.0
 )
 
 require (
