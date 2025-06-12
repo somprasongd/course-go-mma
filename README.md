@@ -16,10 +16,10 @@
 - สร้างระบบส่งอีเมลแบบ Reusable ด้วย Notification Service
 - สร้างระบบจัดการออเดอร์ด้วย Layered Architecture
 - ใช้งาน Database Transaction อย่างไรให้ถูกต้อง
+  - แยกความรับผิดชอบด้วยการซ่อนรายละเอียดของ Subdomain
 - ทำความเข้าใจ Unit of Work และนำมาใช้จริง
 - นำหลักการ Dependency Inversion มาใช้ในระบบจริง
 - แปลงโครงสร้างไปสู่ Modular Architecture อย่างเป็นขั้นตอน
-- แยกความรับผิดชอบด้วยการซ่อนรายละเอียดของ Subdomain
 - ป้องกันการเข้าถึงข้ามโมดูลด้วยโฟลเดอร์ `internal`
 - จัดการ Service ใน Monolith ด้วย Service Registry
 - รวมโค้ดทั้งหมดไว้ใน Mono-Repository อย่างเป็นระบบ
@@ -1307,38 +1307,6 @@ Handler.customer --> Database: ตรวจสอบ email ซ้ำ?
     }
     ```
 
-### Order Handler
-
-การทำงานของ order handler
-
-```markdown
-สั่งออเดอร์ (POST /orders)
--------------------------------
-Client ----> Routing: POST /orders {customer_id, order_total}
-Handler.order --> Database: ตรวจสอบ customer_id
-  └─ ไม่พบ --> Handler.order --> Client: 404 Not Found (customer not found)
-  └─ พบ:
-      Handler.order --> Database: ตรวจสอบ credit เพียงพอ?
-          └─ ไม่พอ --> Monolith.order --> Client: 422 Unprocessable Entity (insufficient credit)
-          └─ พอ:
-              Handler.order --> Database: INSERT INTO orders, UPDATE credit (หักยอด)
-              Module.email --> ส่งอีเมลยืนยันออเดอร์
-              Handler.order --> Client: 201 Created
-
-ยกเลิกออเดอร์ (DELETE /orders/:orderID)
----------------------------------------------
-Client ----> Routing: DELETE /orders/:orderID
-Handler.order --> Database: ตรวจสอบ orderID
-  └─ ไม่พบ --> Handler.order --> Client: 404 Not Found (order not found)
-  └─ พบ:
-      Handler.order --> Database: DELETE order, UPDATE credit (คืนยอด)
-      Handler.order --> Client: 204 No Content
-```
-
-สร้าง order handler
-
-- ใน `handler/order.go`
-
     ```go
     package handler
     
@@ -1444,6 +1412,37 @@ Handler.order --> Database: ตรวจสอบ orderID
     }
     ```
 
+### Order Handler
+
+การทำงานของ order handler
+
+```markdown
+สั่งออเดอร์ (POST /orders)
+-------------------------------
+Client ----> Routing: POST /orders {customer_id, order_total}
+Handler.order --> Database: ตรวจสอบ customer_id
+  └─ ไม่พบ --> Handler.order --> Client: 404 Not Found (customer not found)
+  └─ พบ:
+      Handler.order --> Database: ตรวจสอบ credit เพียงพอ?
+          └─ ไม่พอ --> Monolith.order --> Client: 422 Unprocessable Entity (insufficient credit)
+          └─ พอ:
+              Handler.order --> Database: INSERT INTO orders, UPDATE credit (หักยอด)
+              Module.email --> ส่งอีเมลยืนยันออเดอร์
+              Handler.order --> Client: 201 Created
+
+ยกเลิกออเดอร์ (DELETE /orders/:orderID)
+---------------------------------------------
+Client ----> Routing: DELETE /orders/:orderID
+Handler.order --> Database: ตรวจสอบ orderID
+  └─ ไม่พบ --> Handler.order --> Client: 404 Not Found (order not found)
+  └─ พบ:
+      Handler.order --> Database: DELETE order, UPDATE credit (คืนยอด)
+      Handler.order --> Client: 204 No Content
+```
+
+สร้าง order handler
+
+- ใน `handler/order.go`
 - แก้ `application/http.go` เพื่อ bind handler
 
     ```go
@@ -3479,10 +3478,10 @@ var (
      "github.com/jmoiron/sqlx"
     )
     
-    // DBTX is the common interface between *[sqlx.DB] and *[sqlx.Tx].
+    // DBTX คือ interface กลางระหว่าง *sqlx.DB และ *sqlx.Tx
+    // รวม method ของทั้ง database/sql และ sqlx เพื่อให้สามารถใช้ interchangeably ได้
     type DBTX interface {
      // database/sql methods
-    
      ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
      PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
      QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -3494,7 +3493,6 @@ var (
      QueryRow(query string, args ...any) *sql.Row
     
      // sqlx methods
-    
      GetContext(ctx context.Context, dest any, query string, args ...any) error
      MustExecContext(ctx context.Context, query string, args ...any) sql.Result
      NamedExecContext(ctx context.Context, query string, arg any) (sql.Result, error)
@@ -3519,16 +3517,19 @@ var (
      DriverName() string
     }
     
+    // ขยาย interface DBTX โดยเพิ่ม method สำหรับเริ่ม transaction
     type sqlxDB interface {
      DBTX
      BeginTxx(ctx context.Context, opts *sql.TxOptions) (*sqlx.Tx, error)
     }
     
+    // interface สำหรับจัดการ transaction lifecycle
     type sqlxTx interface {
      Commit() error
      Rollback() error
     }
     
+    // compile-time check เพื่อให้แน่ใจว่า type เหล่านี้ implement interface ที่กำหนด
     var (
      _ DBTX   = &sqlx.DB{}
      _ DBTX   = &sqlx.Tx{}
@@ -3537,16 +3538,19 @@ var (
     )
     
     type (
+     // ใช้เป็น key สำหรับ context value ของ transactor
      transactorKey struct{}
-     // DBTXContext is used to get the current DB handler from the context.
-     // It returns the current transaction if there is one, otherwise it will return the original DB.
+    
+     // DBTXContext ใช้ดึง DBTX ปัจจุบันจาก context (อาจเป็น transaction หรือ db ปกติ)
      DBTXContext func(context.Context) DBTX
     )
     
+    // ฝัง sqlxDB (เช่น tx) ลงใน context เพื่อใช้ใน logic ต่อไป
     func txToContext(ctx context.Context, tx sqlxDB) context.Context {
      return context.WithValue(ctx, transactorKey{}, tx)
     }
     
+    // ดึง sqlxDB ออกมาจาก context ถ้ามี
     func txFromContext(ctx context.Context) sqlxDB {
      if tx, ok := ctx.Value(transactorKey{}).(sqlxDB); ok {
       return tx
@@ -3575,36 +3579,44 @@ var (
          "github.com/jmoiron/sqlx"
         )
         
-        // NestedTransactionsNone is an implementation that prevents using nested transactions.
+        // NestedTransactionsNone ป้องกันไม่ให้เกิด nested transaction
+        // เหมาะสำหรับระบบที่ไม่รองรับหรือไม่ต้องการ nested tx หรือเพื่อป้องกัน logic ซ้อนผิดพลาด
         func NestedTransactionsNone(db sqlxDB, tx *sqlx.Tx) (sqlxDB, sqlxTx) {
          switch typedDB := db.(type) {
          case *sqlx.DB:
+          // ถ้าเป็น root DB -> wrap tx ด้วย nestedTransactionNone เพื่อป้องกัน nested
           return &nestedTransactionNone{tx}, tx
         
          case *nestedTransactionNone:
+          // ถ้า tx ถูก wrap แล้ว -> คืนอันเดิมไป (กัน nested)
           return typedDB, typedDB
         
          default:
-          panic("unsupported type")
+          panic("unsupported type") // ไม่รองรับ type อื่น
          }
         }
         
+        // nestedTransactionNone เป็น struct ที่ wrap *sqlx.Tx
+        // และ override method ที่เกี่ยวกับการเริ่ม/commit/rollback transaction
+        // ให้ return error เสมอ เพื่อ block การทำ nested transaction
         type nestedTransactionNone struct {
          *sqlx.Tx
         }
         
+        // Override BeginTxx เพื่อ block nested tx
         func (t *nestedTransactionNone) BeginTxx(_ context.Context, _ *sql.TxOptions) (*sqlx.Tx, error) {
          return nil, errors.New("nested transactions are not supported")
         }
         
+        // Override Commit เพื่อป้องกันการ commit nested tx
         func (t *nestedTransactionNone) Commit() error {
          return errors.New("nested transactions are not supported")
         }
         
+        // Override Rollback เพื่อป้องกันการ rollback nested tx
         func (t *nestedTransactionNone) Rollback() error {
          return errors.New("nested transactions are not supported")
         }
-        
         ```
 
   - **ใช้ Savepoints** (เหมาะกับระบบที่อาจซ้อน transaction ได้)
@@ -3625,14 +3637,16 @@ var (
          "github.com/jmoiron/sqlx"
         )
         
-        // NestedTransactionsSavepoints is a nested transactions implementation using savepoints.
-        // It's compatible with PostgreSQL, MySQL, MariaDB, and SQLite.
+        // NestedTransactionsSavepoints ใช้ savepoint เพื่อจำลอง nested transaction
+        // รองรับ DB ที่สนับสนุน savepoint เช่น PostgreSQL, MySQL, MariaDB, SQLite
         func NestedTransactionsSavepoints(db sqlxDB, tx *sqlx.Tx) (sqlxDB, sqlxTx) {
          switch typedDB := db.(type) {
          case *sqlx.DB:
+          // เริ่ม nested transaction จาก root db
           return &nestedTransactionSavepoints{Tx: tx}, tx
         
          case *nestedTransactionSavepoints:
+          // ซ้อน nested อีกชั้น (เพิ่ม depth)
           nestedTransaction := &nestedTransactionSavepoints{
            Tx:    tx,
            depth: typedDB.depth + 1,
@@ -3640,45 +3654,46 @@ var (
           return nestedTransaction, nestedTransaction
         
          default:
-          panic("unsupported type")
+          panic("unsupported type") // ไม่รองรับ type อื่น
          }
         }
         
+        // struct สำหรับจัดการ nested transaction ด้วย savepoint
         type nestedTransactionSavepoints struct {
          *sqlx.Tx
-         depth int64
-         done  atomic.Bool
+         depth int64       // ลำดับของ nested level (ใช้ในการตั้งชื่อ savepoint)
+         done  atomic.Bool // เพื่อป้องกันไม่ให้ Commit() หรือ Rollback() ถูกเรียกซ้ำ
         }
         
+        // BeginTxx สร้าง savepoint ใหม่ตามลำดับ depth
         func (t *nestedTransactionSavepoints) BeginTxx(ctx context.Context, _ *sql.TxOptions) (*sqlx.Tx, error) {
          if _, err := t.ExecContext(ctx, "SAVEPOINT sp_"+strconv.FormatInt(t.depth+1, 10)); err != nil {
           return nil, fmt.Errorf("failed to create savepoint: %w", err)
          }
-        
          return t.Tx, nil
         }
         
+        // Commit จะ release savepoint ที่เกี่ยวข้องกับ level นี้
+        // ใช้ CompareAndSwap เพื่อกันการ commit ซ้ำ
         func (t *nestedTransactionSavepoints) Commit() error {
          if !t.done.CompareAndSwap(false, true) {
-          return sql.ErrTxDone
+          return sql.ErrTxDone // ป้องกันการ commit ซ้ำ
          }
-        
          if _, err := t.Exec("RELEASE SAVEPOINT sp_" + strconv.FormatInt(t.depth, 10)); err != nil {
           return fmt.Errorf("failed to release savepoint: %w", err)
          }
-        
          return nil
         }
         
+        // Rollback จะ rollback ไปยัง savepoint ของ level นี้
+        // และ mark ว่า transaction นี้จบแล้ว
         func (t *nestedTransactionSavepoints) Rollback() error {
          if !t.done.CompareAndSwap(false, true) {
-          return sql.ErrTxDone
+          return sql.ErrTxDone // ป้องกัน rollback ซ้ำ
          }
-        
          if _, err := t.Exec("ROLLBACK TO SAVEPOINT sp_" + strconv.FormatInt(t.depth, 10)); err != nil {
           return fmt.Errorf("failed to rollback to savepoint: %w", err)
          }
-        
          return nil
         }
         ```
@@ -3700,94 +3715,123 @@ var (
      "github.com/jmoiron/sqlx"
     )
     
+    // PostCommitHook คือฟังก์ชันที่สามารถลงทะเบียนเพื่อให้ทำงานหลังจาก Commit เสร็จแล้ว
     type PostCommitHook func(ctx context.Context) error
     
+    // Transactor คือ interface สำหรับการจัดการ Transaction
     type Transactor interface {
-     WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error) error
+     // WithinTransaction ใช้สำหรับรันโค้ดใน Transaction
+     // และสามารถลงทะเบียน PostCommitHook เพื่อรันหลังจาก Commit ได้
+     WithinTransaction(
+      ctx context.Context,
+      txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error,
+     ) error
     }
     
+    // กำหนด alias สำหรับประเภทที่ใช้เพื่อ inject dependencies
     type (
-     sqlxDBGetter               func(context.Context) sqlxDB
-     nestedTransactionsStrategy func(sqlxDB, *sqlx.Tx) (sqlxDB, sqlxTx)
+     sqlxDBGetter               func(context.Context) sqlxDB // ดึง *sqlx.DB หรือ *sqlx.Tx จาก context
+     nestedTransactionsStrategy func(sqlxDB, *sqlx.Tx) (sqlxDB, sqlxTx) // กลยุทธ์สำหรับจัดการ nested transaction
     )
     
-    type sqlTransactor struct {
-     sqlxDBGetter
-     nestedTransactionsStrategy
+    // sqlxTransactor คือ implementation ของ Transactor
+    type sqlxTransactor struct {
+     sqlxDBGetter               // วิธีดึง DB/Tx จาก context
+     nestedTransactionsStrategy // กลยุทธ์ในการจัดการ nested transaction
     }
     
-    type Option func(*sqlTransactor)
+    // Option ใช้สำหรับกำหนดค่าเพิ่มเติมให้ sqlxTransactor เช่น กลยุทธ์ nested transaction
+    type Option func(*sqlxTransactor)
     
+    // New สร้าง instance ของ Transactor และ DBTXContext
     func New(db *sqlx.DB, opts ...Option) (Transactor, DBTXContext) {
-     t := &sqlTransactor{
+     t := &sqlxTransactor{
+      // default: ถ้า context มี tx ให้ใช้ tx, ไม่งั้นใช้ db
       sqlxDBGetter: func(ctx context.Context) sqlxDB {
        if tx := txFromContext(ctx); tx != nil {
         return tx
        }
        return db
       },
-      nestedTransactionsStrategy: NestedTransactionsNone, // Default strategy
+      nestedTransactionsStrategy: NestedTransactionsNone, // default strategy: ไม่รองรับ nested transaction
      }
     
+     // apply ตัวเลือกเพิ่มเติม (ถ้ามี)
      for _, opt := range opts {
       opt(t)
      }
     
+     // สร้างฟังก์ชันสำหรับดึง DBTX จาก context
      dbGetter := func(ctx context.Context) DBTX {
       if tx := txFromContext(ctx); tx != nil {
        return tx
       }
-    
       return db
      }
     
      return t, dbGetter
     }
     
+    // WithNestedTransactionStrategy ใช้เปลี่ยนกลยุทธ์ nested transaction (เช่น Savepoints)
     func WithNestedTransactionStrategy(strategy nestedTransactionsStrategy) Option {
-     return func(t *sqlTransactor) {
+     return func(t *sqlxTransactor) {
       t.nestedTransactionsStrategy = strategy
      }
     }
     
-    func (t *sqlTransactor) WithinTransaction(ctx context.Context, txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error) error {
+    // WithinTransaction ใช้สำหรับรันฟังก์ชันหนึ่งใน transaction context
+    func (t *sqlxTransactor) WithinTransaction(
+     ctx context.Context,
+     txFunc func(ctxWithTx context.Context, registerPostCommitHook func(PostCommitHook)) error,
+    ) error {
+     // ดึง database หรือ transaction object จาก context
      currentDB := t.sqlxDBGetter(ctx)
     
+     // เริ่มต้น transaction ใหม่
      tx, err := currentDB.BeginTxx(ctx, nil)
      if err != nil {
       return fmt.Errorf("failed to begin transaction: %w", err)
      }
     
-     var hooks []PostCommitHook
+     var hooks []PostCommitHook // เก็บ hook ที่จะเรียกหลังจาก commit
     
+     // ฟังก์ชันสำหรับให้ผู้ใช้ลงทะเบียน post-commit hook
      registerPostCommitHook := func(hook PostCommitHook) {
       hooks = append(hooks, hook)
      }
     
+     // สร้าง nested transaction context ใหม่ (ใช้กลยุทธ์ที่กำหนดไว้)
      newDB, currentTX := t.nestedTransactionsStrategy(currentDB, tx)
+    
+     // เผื่อกรณี panic หรือ error แล้วไม่ได้ commit — จะ rollback ให้อัตโนมัติ
      defer func() {
-      _ = currentTX.Rollback() // If rollback fails, there's nothing to do, the transaction will expire by itself
+      _ = currentTX.Rollback()
      }()
+    
+     // inject transaction object เข้า context ใหม่
      ctxWithTx := txToContext(ctx, newDB)
     
+     // เรียกใช้ฟังก์ชันที่รับ context + hook registration
      if err := txFunc(ctxWithTx, registerPostCommitHook); err != nil {
-      return err
+      return err // ถ้า error, transaction จะถูก rollback ใน defer
      }
     
+     // พยายาม commit
      if err := currentTX.Commit(); err != nil {
       return fmt.Errorf("failed to commit transaction: %w", err)
      }
     
-     // หลังจาก commit แล้ว รัน hook แบบ isolated
+     // หลังจาก commit เสร็จ ให้ run post-commit hooks แบบ async
      go func() {
       for _, hook := range hooks {
        func(h PostCommitHook) {
         defer func() {
+         // ดัก panic เพื่อไม่ให้ crash และ log ไว้
          if r := recover(); r != nil {
-          // Log panic ที่เกิดใน hook
           logger.Log.Error(fmt.Sprintf("post-commit hook panic: %v", r))
          }
         }()
+        // ถ้า error จาก hook ก็ log ไว้
         if err := h(ctx); err != nil {
          logger.Log.Error(fmt.Sprintf("post-commit hook error: %v", err))
         }
@@ -3798,16 +3842,18 @@ var (
      return nil
     }
     
+    // IsWithinTransaction ใช้ตรวจสอบว่า context นี้อยู่ใน transaction หรือไม่
     func IsWithinTransaction(ctx context.Context) bool {
      return ctx.Value(transactorKey{}) != nil
     }
+    
     ```
 
-**สรุป**
+    **สรุป**
 
-- ใช้ `Transactor` เพื่อควบคุมหลาย DB operation ให้เป็น atomic unit
-- Inject `DBTX` ผ่าน context ทำให้ repository ไม่ต้องรู้ว่าอยู่ใน transaction หรือไม่
-- รองรับ nested transactions ด้วย savepoint หากจำเป็น
+  - ใช้ `Transactor` เพื่อควบคุมหลาย DB operation ให้เป็น atomic unit
+  - Inject `DBTX` ผ่าน context ทำให้ repository ไม่ต้องรู้ว่าอยู่ใน transaction หรือไม่
+  - รองรับ nested transactions ด้วย savepoint หากจำเป็น
 
 ### ปรับปรุง Repository Layer
 
@@ -5706,3 +5752,3314 @@ customer/
 ```go
 could not import go-mma/modules/customer/internal/repository (invalid use of internal package "go-mma/modules/customer/internal/repository")
 ```
+
+## รวมโค้ดทั้งหมดไว้ใน Mono-Repository อย่างเป็นระบบ
+
+เพื่อให้การพัฒนาเป็นระบบมากขึ้น และลดความซับซ้อนเมื่อโปรเจกต์เติบโต เราแนะนำให้แยกแต่ละโมดูลหลัก เช่น `customer`, `order`, และ `notification` ออกเป็น **โปรเจกต์ย่อย (submodule)** โดยแต่ละโปรเจกต์จะมี `go.mod` ของตัวเอง
+
+แต่ยังคงเก็บทุกอย่างไว้ใน Git repository เดียวกัน เรียกว่า **Mono-Repository**
+
+**โดยจะแบ่งโค้ดออกเป็น 3 ส่วน หลักๆ คือ**
+
+- **app:** สำหรับโหลดโมดูล และรันโปรแกรม
+- **modules:** สำหรับสร้างโมดูลต่างๆ
+- **shared:** สำหรับโค้ดที่ใช้งานร่วมกัน
+
+### โครงสร้างใหม่
+
+```bash
+.
+├── docker-compose.dev.yml
+├── docker-compose.yml
+├── go-mma.code-workspace
+├── Makefile
+├── migrations
+│   ├── 20250529103238_create_customer.down.sql
+│   ├── 20250529103238_create_customer.up.sql
+│   ├── 20250529103715_create_order.down.sql
+│   └── 20250529103715_create_order.up.sql
+└── src
+    ├── app
+    │   ├── application
+    │   │   ├── application.go
+    │   │   ├── http.go
+    │   │   └── middleware.go
+    │   │   │   ├── request_logger.go
+    │   │   │   └── response_error.go
+    │   ├── cmd
+    │   │   └── api
+    │   │       └── main.go
+    │   ├── config
+    │   │   └── config.go
+    │   ├── go.mod
+    │   ├── go.sum
+    │   └── util
+    │       └── env
+    │           └── env.go
+    ├── modules
+    │   ├── customers
+    │   │   ├── dtos
+    │   │   │   ├── customer_request.go
+    │   │   │   ├── customer_response.go
+    │   │   │   └── customer.go
+    │   │   ├── handler
+    │   │   │   └── customer.go
+    │   │   ├── internal
+    │   │   │   ├── model
+    │   │   │   │   └── customer.go
+    │   │   │   └── repository
+    │   │   │       └── customer.go
+    │   │   ├── module.go
+    │   │   ├── service
+    │   │   │   └── customer.go
+    │   │   ├── test
+    │   │   │   └── customer.http
+    │   │   ├── go.mod
+    │   │   └── go.sum
+    │   ├── notifications
+    │   │   ├── module.go
+    │   │   ├── service
+    │   │   │   └── notification.go
+    │   │   ├── go.mod
+    │   │   └── go.sum
+    │   └── orders
+    │   │   ├── dtos
+    │   │   │   ├── order_request.go
+    │   │   │   └── order_response.go
+    │   │   ├── handler
+    │   │   │   └── order.go
+    │   │   ├── internal
+    │   │   │   ├── model
+    │   │   │   │   └── order.go
+    │   │   │   └── repository
+    │   │   │       └── order.go
+    │   │   ├── module.go
+    │   │   ├── service
+    │   │   │   └── order.go
+    │   │   ├── test
+    │   │   │   └── order.http
+    │   │   ├── go.mod
+    │   │   └── go.sum
+    └── shared
+        └──common
+            ├── errs
+            │   ├── errs.go
+            │   ├── helper.go
+            │   └── types.go
+            ├── logger
+            │   └── logger.go
+            ├── module
+            │   └── module.go
+            ├── registry
+            │   ├── helper.go
+            │   └── service_registry.go
+            ├── storage
+            │   └── db
+            │       ├── db.go
+            │       └── transactor
+            │           ├── nested_transactions_none.go
+            │           ├── nested_transactions_savepoints.go
+            │           ├── transactor.go
+            │           └── types.go
+            ├── go.mod
+            └── go.sum
+```
+
+**ข้อดีของการจัดแบบนี้**
+
+- **แยกขอบเขตชัดเจน**: แต่ละโมดูลพัฒนาและทดสอบได้แบบอิสระ
+- **ควบคุมเวอร์ชันได้ง่าย**: ใช้ `go.mod` จัดการ dependency ภายในแต่ละโมดูล
+- **รวมศูนย์การจัดการ**: ยังใช้ Git ร่วมกันใน repo เดียว ไม่ต้องแยกหลาย repo
+- **พร้อมสำหรับการแยกเป็น microservice ในอนาคต**: โครงสร้างรองรับการแยก deploy ได้หากจำเป็น
+
+### สร้างโปรเจกต์ใหม่
+
+- สร้าง Folder ใหม่ ดังนี้
+
+    ```bash
+    # อยู่ที่ root project
+    mkdir -p src/app
+    mkdir -p src/modules/customer
+    mkdir -p src/modules/notification
+    mkdir -p src/modules/order
+    mkdir -p src/shared/common
+    ```
+
+- สร้าง app โปรเจกต์
+
+    ```bash
+    # อยู่ที่ root project
+    cd src/app
+    go mod init go-mma
+    ```
+
+- สร้าง customer โปรเจกต์
+
+    ```bash
+    cd ../..
+    # อยู่ที่ root project
+    cd src/modules/customer
+    go mod init go-mma/modules/customer
+    ```
+
+- สร้าง notification โปรเจกต์
+
+    ```bash
+    cd ../../..
+    # อยู่ที่ root project
+    cd src/modules/notification
+    go mod init go-mma/modules/notification
+    ```
+
+- สร้าง order โปรเจกต์
+
+    ```bash
+    cd ../../..
+    # อยู่ที่ root project
+    cd src/modules/order
+    go mod init go-mma/modules/order
+    ```
+
+- สร้าง common โปรเจค
+
+    ```bash
+    cd ../../..
+    # อยู่ที่ root project
+    cd src/shared/common
+    go mod init go-mma/shared/common
+    ```
+
+### ทำ L**ocal module replacement**
+
+เมื่อพัฒนาแบบ Monorepo เพื่อให้แต่ละโมดูลสามารถอ้างถึงกันได้โดยตรงจากไฟล์ในเครื่อง โดยไม่ต้อง publish ไปที่ remote repo ใน Go ทำได้โดย การใช้คำสั่ง `replace` ใน `go.mod`
+
+- โปรเจกต์ notification มีการใช้งาน common
+
+    > แก้ไขไฟล์ `notification/go.mod`
+    >
+
+    ```bash
+    module go-mma/modules/notification
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../../shared/common
+    ```
+
+- โปรเจกต์ customer มีการใช้งาน common, notification
+
+    > แก้ไขไฟล์ `customer/go.mod`
+    >
+
+    ```bash
+    module go-mma/modules/customer
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../../shared/common
+    
+    replace go-mma/modules/notification v0.0.0 => ../../modules/notification
+    ```
+
+- โปรเจกต์ order มีการใช้งาน common, notification, customer
+
+    > แก้ไขไฟล์ `order/go.mod`
+    >
+
+    ```bash
+    module go-mma/modules/order
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../../shared/common
+    
+    replace go-mma/modules/notification v0.0.0 => ../../modules/notification
+    
+    replace go-mma/modules/customer v0.0.0 => ../../modules/customer
+    ```
+
+- โปรเจกต์ app มีการใช้งาน common, notification, customer, order
+
+    แก้ไขไฟล์ `app/go.mod`
+
+    ```bash
+    module go-mma
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../shared/common
+    
+    replace go-mma/modules/notification v0.0.0 => ../modules/notification
+    
+    replace go-mma/modules/customer v0.0.0 => ../modules/customer
+    
+    replace go-mma/modules/order v0.0.0 => ../modules/order
+    ```
+
+### สร้าง VS Code Workspace
+
+สำหรับการทำ Mono-Repo ใน VS Code ต้องเปิดแบบ Workspace ถึงจะสามารถทำงานได้ถูกต้อง
+
+- สร้างไฟล์ `go-mma.code-workspace`
+
+    ```bash
+    {
+     "folders": [
+      {
+       "path": "."
+      },
+      {
+       "path": "src/app"
+      },
+      {
+       "path": "src/modules/customer"
+      },
+      {
+       "path": "src/modules/order"
+      },
+      {
+       "path": "src/modules/notification"
+      },
+      {
+       "path": "src/shared/common"
+      }
+     ],
+     "settings": {}
+    }
+    ```
+
+- เลือกที่เมนู File เลือก Open Workspace from file…
+- เลือกที่ไฟล์ `go-mma.code-workspace`
+- กด Open
+- ใน Explorer จะแสดง แบบนี้
+
+    ```bash
+    go-mma
+    app
+    customer
+    order
+    notification
+    common
+    ```
+
+### โปรเจกต์ common
+
+- ให้ทำการย้ายโค้ดใน `util` ทั้งหมด ยกเว้น `env` มาไว้ในโปรเจกต์ `common`
+
+    ```bash
+    common
+    ├── go.mod
+    ├── errs
+    │   ├── errs.go
+    │   ├── helpers.go
+    │   └── types.go
+    ├── idgen
+    │   └── idgen.go
+    ├── logger
+    │   └── logger.go
+    ├── module
+    │   └── module.go
+    ├── registry
+    │   ├── helper.go
+    │   └── service_registry.go
+    └── storage
+        └── sqldb
+            ├── sqldb.go
+            └── transactor
+                ├── nested_transactions_none.go
+                ├── nested_transactions_savepoints.go
+                ├── transactor.go
+                └── types.go
+    ```
+
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### โปรเจกต์ notification
+
+- ให้ทำการย้ายโค้ดใน `modules/notification` ทั้งหมด  มาไว้ในโปรเจกต์ `notification`
+
+    ```bash
+    notification
+    ├── go.mod
+    ├── go.sum
+    ├── module.go
+    └── service
+        └── notification.go
+    ```
+
+- แก้ไข path ของการ `import` ดังนี้
+  - `go-mma/util/logger` → `go-mma/shared/common/logger`
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### โปรเจกต์ customer
+
+- ให้ทำการย้ายโค้ดใน `modules/customer` ทั้งหมด  มาไว้ในโปรเจกต์ `customer`
+
+    ```bash
+    customer
+    ├── dto
+    │   ├── customer_request.go
+    │   ├── customer_response.go
+    │   └── customer.go
+    ├── go.mod
+    ├── go.sum
+    ├── handler
+    │   └── customer.go
+    ├── internal
+    │   ├── model
+    │   │   └── customer.go
+    │   └── repository
+    │       └── customer.go
+    ├── module.go
+    ├── service
+    │   └── customer.go
+    └── test
+        └── customers.http
+    ```
+
+- แก้ไข path ของการ `import` ดังนี้
+  - `go-mma/util/errs` → `go-mma/shared/common/errs`
+  - `go-mma/util/logger` → `go-mma/shared/common/logger`
+  - `go-mma/util/module` → `go-mma/shared/common/module`
+  - `go-mma/util/registry` → `go-mma/shared/common/registry`
+  - `go-mma/util/storage/sqldb/transactor` → `go-mma/shared/common/storage/sqldb/transactor`
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### โปรเจกต์ order
+
+- ให้ทำการย้ายโค้ดใน `modules/order` ทั้งหมด  มาไว้ในโปรเจกต์ `order`
+
+    ```bash
+    order
+    ├── dto
+    │   ├── customer_request.go
+    │   ├── customer_response.go
+    │   └── customer.go
+    ├── go.mod
+    ├── go.sum
+    ├── handler
+    │   └── customer.go
+    ├── internal
+    │   ├── model
+    │   │   └── customer.go
+    │   └── repository
+    │       └── customer.go
+    ├── module.go
+    ├── service
+    │   └── customer.go
+    └── test
+        └── customers.http
+    ```
+
+- แก้ไข path ของการ `import` ดังนี้
+  - `go-mma/util/errs` → `go-mma/shared/common/errs`
+  - `go-mma/util/logger` → `go-mma/shared/common/logger`
+  - `go-mma/util/module` → `go-mma/shared/common/module`
+  - `go-mma/util/registry` → `go-mma/shared/common/registry`
+  - `go-mma/util/storage/sqldb/transactor` → `go-mma/shared/common/storage/sqldb/transactor`
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### โปรเจกต์ app
+
+- ให้ทำการย้ายโค้ดใน `application`, `cmd`, `config` และ `util`   มาไว้ในโปรเจกต์ `app`
+
+    ```bash
+    app
+    ├── application
+    │   ├── application.go
+    │   ├── http.go
+    │   └── middleware
+    │       ├── request_logger.go
+    │       └── response_error.go
+    ├── cmd
+    │   └── api
+    │       └── main.go
+    ├── config
+    │   └── config.go
+    ├── go.mod
+    ├── go.sum
+    └── util
+        └── env
+            └── env.go
+    ```
+
+- แก้ไข path ของการ `import` ดังนี้
+  - `go-mma/util/errs` → `go-mma/shared/common/errs`
+  - `go-mma/util/logger` → `go-mma/shared/common/logger`
+  - `go-mma/util/module` → `go-mma/shared/common/module`
+  - `go-mma/util/registry` → `go-mma/shared/common/registry`
+  - `go-mma/util/storage/sqldb` → `go-mma/shared/common/storage/sqldb`
+  - `go-mma/util/storage/sqldb/transactor` → `go-mma/shared/common/storage/sqldb/transactor`
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### รันโปรแกรม
+
+- แก้ไฟล์ `Makefile` เพื่อแก้ path ในการรัน
+
+    > แก้ไขไฟล์ `main.go`
+    >
+
+    ```bash
+    .PHONY: run
+    run:
+     cd src/app && \
+     go run cmd/api/main.go
+    ```
+
+- ทดลองรันโปรแกรม
+
+    ```bash
+    make run
+    ```
+
+### Build โปรแกรม
+
+- แก้ไฟล์ `Makefile` เพื่อแก้ path ในการ build
+
+    > แก้ไขไฟล์ `main.go`
+    >
+
+    ```bash
+    .PHONY: build
+    build:
+     cd src/app && \
+     go build -ldflags \
+     "-X 'go-mma/build.Version=${BUILD_VERSION}' \
+     -X 'go-mma/build.Time=${BUILD_TIME}'" \
+     -o ../../app cmd/api/main.go
+    ```
+
+- ทดลองรัน build
+
+    ```bash
+    make build
+    ```
+
+### Build โปรแกรมเป็น Docker image
+
+- แก้ไฟล์ `Dockerfile` เพื่อแก้ path ในการ build
+
+    > แก้ไขไฟล์ `Dockerfile.go`
+    >
+
+    ```docker
+    FROM golang:1.24-alpine AS base
+    WORKDIR /app
+    COPY go.mod go.sum ./
+    RUN go mod download
+    COPY . .
+    
+    FROM base AS builder
+    ENV GOARCH=amd64
+    
+    # ตั้งค่า default สำหรับ VERSION
+    ARG VERSION=latest
+    ENV IMAGE_VERSION=${VERSION}
+    RUN echo "Build version: $IMAGE_VERSION"
+    RUN cd src/app && \
+     go build -ldflags \
+     "-X 'go-mma/build.Version=${IMAGE_VERSION}' \
+     -X 'go-mma/build.Time=$(date +"%Y-%m-%dT%H:%M:%S%z")'" \
+     -o ../../app cmd/api/main.go
+    
+    FROM alpine:latest
+    WORKDIR /root/
+    EXPOSE 8090
+    ENV TZ=Asia/Bangkok
+    RUN apk --no-cache add ca-certificates tzdata
+    
+    COPY --from=builder /app/app .
+    
+    CMD ["./app"]
+    ```
+
+- ทดลองรัน build
+
+    ```bash
+    make image
+    ```
+
+## กำหนด Public API Contract ระหว่างโมดูล
+
+ในโค้ดปัจจุบัน โมดูล `order` สามารถเรียกใช้ `CustomerService` ของโมดูล `customer` ได้โดยตรง ซึ่ง **ไม่เหมาะสม** เพราะเท่ากับว่าโมดูล `order` รู้รายละเอียดภายในทั้งหมดของ `customer` ซึ่งจะทำให้ระบบขาดความยืดหยุ่นและยากต่อการบำรุงรักษา
+
+แนวทางที่ถูกต้องคือโมดูลแต่ละตัวควรเปิดเผยเฉพาะ interface ที่จำเป็นต่อการใช้งานจากภายนอกเท่านั้น ซึ่งเรียกว่า Public API Contract ซึ่งมีลักษณะ ดังนี้
+
+- ระบุว่า **โมดูลนี้ให้บริการอะไรบ้าง**
+- กำหนด **รูปแบบการเรียกใช้** (method, input, output)
+- **ซ่อนการทำงานภายใน** (encapsulation)
+
+### ตัวอย่างแนวทางการออกแบบ
+
+```bash
+                        ┌────────────────────────────┐
+                        │     customercontract       │
+                        │ ┌────────────────────────┐ │
+                        │ │  CreditManager         │ │
+                        │ │                        │ │
+                        │ │ + ReserveCredit()      │ │
+                        │ │ + ReleaseCredit()      │ │
+                        │ └────────────────────────┘ │
+                        └────────────▲───────────────┘
+                                     │
+        implements                   │  depends on
+                                     │
+┌────────────────────┐     uses      │   ┌────────────────────┐
+│     customer       │───────────────┘   │       order        │
+│ ┌────────────────┐ │                   │ ┌─────────────────┐│
+│ │ CustomerService│◄────────────────────┤ │ OrderService    ││
+│ │ (implements    │ │                   │ │ (depends on     ││
+│ │  CreditManager)│ │                   │ │  CreditManager) ││
+│ └────────────────┘ │                   │ └─────────────────┘│
+└────────────────────┘                   └────────────────────┘
+```
+
+### ประโยชน์ของการใช้ Public API Contract
+
+- ลดการพึ่งพาภายใน (Loose Coupling)
+- เปลี่ยนแปลงภายในได้อิสระ โดยไม่กระทบโมดูลอื่น
+- รองรับการทดสอบง่ายขึ้น (mock ได้)
+- เตรียมพร้อมสำหรับการแยกเป็น microservice หากจำเป็น
+
+### สร้าง Customer Contract
+
+`customercontract` เป็น โปรเจกต์กลาง ที่เก็บ public interfaces เช่น `CreditManager` ในการสร้างนั้นใช้ 2 หลักการนี้
+
+1. **Interface Segregation Principle (ISP)** ใช้เพื่อแยก interface ของ `CustomerService` ให้เป็น interface ย่อยๆ
+2. เนื่องจากเราทำเป็น mono-repo ดังนั้น จะ**สร้าง contract เป็นโปรเจกต์แยกออกมาจากโปรเจกต์โมดูล customer** เพราะว่า
+    - Low Coupling: `order` ไม่ต้อง import logic หรือ dependency ของ `customer` โดยตรง
+    - เปลี่ยน implementation ได้อิสระ: เปลี่ยน logic ภายใน `customer` โดยไม่กระทบ `order`
+    - Encapsulation: ป้องกันการ import โค้ดภายใน customer ที่ไม่ได้ตั้งใจเปิดเผย
+
+ขั้นตอนการสร้าง customer contract
+
+- สร้างโปรเจกต์ใหม่
+
+    ```bash
+    mkdir -p src/shared/contract/customercontract
+    cd src/shared/contract/customercontract
+    go mod init go-mma/shared/contract/customercontract
+    ```
+
+- เพิ่มโปรเจกต์เข้า workspace
+
+    > แก้ไขไฟล์ `go-mma.code-workspace`
+    >
+
+    ```bash
+    {
+      "folders": [
+        {
+          "path": "."
+        },
+        {
+          "path": "src/app"
+        },
+        {
+          "path": "src/modules/customer"
+        },
+        {
+          "path": "src/shared/contract/customercontract"
+        },
+        {
+          "path": "src/modules/order"
+        },
+        {
+          "path": "src/modules/notification"
+        },
+        {
+          "path": "src/shared/common"
+        }
+      ],
+      "settings": {}
+    }
+    ```
+
+- แก้ไขไฟล์ `go.mod`
+
+    ```go
+    module go-mma/shared/contract/customercontract
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../../common
+    ```
+
+- สร้าง customer contract
+
+    > สร้างไฟล์ `contract/customercontract/contract.go`
+    >
+
+    ```go
+    package customercontract
+    
+    import (
+     "context"
+     "go-mma/shared/common/registry"
+    )
+    
+    const (
+     CreditManagerKey registry.ServiceKey = "customer:contract:credit"
+    )
+    
+    type CustomerInfo struct {
+     ID     int64    `json:"id"`
+     Email  string   `json:"email"`
+     Credit int      `json:"credit"`
+    }
+    
+    func NewCustomerInfo(id int64, email string, credit int) *CustomerInfo {
+     return &CustomerInfo{ID: id, Email: email, Credit: credit}
+    }
+    
+    type CustomerReader interface {
+     GetCustomerByID(ctx context.Context, id int64) (*CustomerInfo, error)
+    }
+    
+    type CreditManager interface {
+     CustomerReader // embed เพื่อ reuse
+     ReserveCredit(ctx context.Context, id int64, amount int) error
+     ReleaseCredit(ctx context.Context, id int64, amount int) error
+    }
+    ```
+
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### โมดูล Customer
+
+ต้องปรับให้ `CustomerService` มา implement `customercontract`
+
+- ทำ module replacement
+
+    > แก้ไขไฟล์ `customer/go.mod`
+    >
+
+    ```go
+    module go-mma/modules/customer
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../../shared/common
+    
+    replace go-mma/modules/notification v0.0.0 => ../../modules/notification
+    
+    replace go-mma/shared/contract/customercontract v0.0.0 => ../../shared/contract/customercontract
+    
+    require (
+     github.com/gofiber/fiber/v3 v3.0.0-beta.4
+     go-mma/modules/notification v0.0.0
+     go-mma/shared/common v0.0.0
+     go-mma/shared/contract/customercontract v0.0.0
+    )
+    
+    // ...
+    ```
+
+- ปรับให้ `CustomerService` มา implement `customercontract`
+
+    > แก้ไขไฟล์ `src/modules/customer/service/customer.go`
+    >
+
+    ```go
+    package service
+    
+    import (
+     "context"
+    
+      "go-mma/modules/customer/dto"
+     "go-mma/modules/customer/internal/model"
+     "go-mma/modules/customer/internal/repository"
+     "go-mma/shared/common/errs"
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/storage/sqldb/transactor"
+     "go-mma/shared/contract/customercontract"  // <-- ตรงนี้
+    
+     notiService "go-mma/modules/notification/service"
+    )
+    
+    // ...
+    
+    type CustomerService interface {
+     CreateCustomer(ctx context.Context, req *dto.CreateCustomerRequest) (*dto.CreateCustomerResponse, error)
+     customercontract.CreditManager   // <-- implement customercontract
+    }
+    
+    // ...
+    
+    func (s *customerService) CreateCustomer(ctx context.Context, req *customercontract.CreateCustomerRequest) (*customercontract.CreateCustomerResponse, error) { // <-- แก้ให้ return เป็น contract แทน dto
+     // ...
+     
+     // <-- เปลี่ยนมาสร้าง Response จาก contract
+     return customercontract.NewCustomerInfo(customer.ID, customer.Email, customer.Credit), nil
+    }
+    ```
+
+- เปลี่ยนส่งออก service ด้วย key `customercontract.CreditManagerKey`
+
+    > แก้ไขไฟล์ `customer/module.go`
+    >
+
+    ```go
+    // ยกเลิกการใช้งาน
+    // const (
+    //  CustomerServiceKey registry.ServiceKey = "CustomerService"
+    // )
+    
+    func (m *moduleImp) Services() []registry.ProvidedService {
+     return []registry.ProvidedService{
+       // เปลี่ยน key มาจาก Contract แทน
+      {Key: customercontract.CreditManagerKey, Value: m.custSvc},
+     }
+    }
+    ```
+
+### โมดูล Order
+
+รู้จักแค่ interface `CreditManager` ที่มาจาก `customercontract`
+
+- ทำ module replacement
+
+    > แก้ไขไฟล์  `order/go.mod`
+    >
+
+    ```go
+    module go-mma/modules/order
+    
+    go 1.24.4
+    
+    replace go-mma/shared/common v0.0.0 => ../../shared/common
+    
+    replace go-mma/modules/notification v0.0.0 => ../../modules/notification
+    
+    replace go-mma/modules/customer v0.0.0 => ../../modules/customer
+    
+    replace go-mma/shared/contract/customercontract v0.0.0 => ../../shared/contract/customercontract
+    
+    // ...
+    ```
+
+- เปลี่ยนมาเรียกใช้ `customercontract` แทนการเรียกใช้ `CustomerService` ตรงๆ
+
+    > แก้ไขไฟล์ `order/service/order.go`
+    >
+
+    ```go
+    package service
+    
+    import (
+     "context"
+     "go-mma/modules/order/dto"
+     "go-mma/modules/order/internal/model"
+     "go-mma/modules/order/internal/repository"
+     "go-mma/shared/common/errs"
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/storage/sqldb/transactor"
+     "go-mma/shared/contract/customercontract" // <-- ตรงนี้
+    
+     notiService "go-mma/modules/notification/service"
+    )
+    
+    var (
+     ErrNoOrderID = errs.ResourceNotFoundError("the order with given id was not found")
+    )
+    
+    type OrderService interface {
+     CreateOrder(ctx context.Context, req *dto.CreateOrderRequest) (*dto.CreateOrderResponse, error)
+     CancelOrder(ctx context.Context, id int64) error
+    }
+    
+    type orderService struct {
+     transactor transactor.Transactor
+     custSvc    customercontract.CreditManager // <-- ตรงนี้
+     orderRepo  repository.OrderRepository
+     notiSvc    notiService.NotificationService
+    }
+    
+    func NewOrderService(
+     transactor transactor.Transactor,
+     custSvc customercontract.CreditManager, // <-- ตรงนี้
+     orderRepo repository.OrderRepository,
+     notiSvc notiService.NotificationService) OrderService {
+     return &orderService{
+      transactor: transactor,
+      custSvc:    custSvc,
+      orderRepo:  orderRepo,
+      notiSvc:    notiSvc,
+     }
+    }
+    
+    // ...
+    ```
+
+    <aside>
+    💡
+
+    ถ้าลองดูที่ `custSvc` จะเห็นว่าสามารถเรียกใช้ได้แค่ 3 methods เท่าที่ contract ระบุไว้เท่านั้น
+
+    </aside>
+
+- เปลี่ยนการดึง Service จาก registry มาเป็น `customercontract.CreditManager` แทน `CustomerService`
+
+    > แก้ไขไฟล์ `src/modules/order/module.go`
+    >
+
+    ```go
+    package order
+    
+    import (
+     "go-mma/modules/order/handler"
+     "go-mma/modules/order/internal/repository"
+     "go-mma/modules/order/service"
+     "go-mma/shared/common/module"
+     "go-mma/shared/common/registry"
+     "go-mma/shared/contract/customercontract" // <-- ตรงนี้
+    
+     notiModule "go-mma/modules/notification"
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    // ...
+    
+    func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+     // <-- ตรงนี้
+     // Resolve CustomerService as CreditManagerKey from the registry
+     custSvc, err := registry.ResolveAs[customercontract.CreditManager](reg, customercontract.CreditManagerKey)
+     if err != nil {
+      return err
+     }
+      
+      // ...
+    }
+    ```
+
+### รันโปรแกรม
+
+ก่อนจะรันโปรแกรมต้องทำให้โปรเจกต์ `app` รู้จัก `customercontract`  ด้วย
+
+- ทำ module replacement
+
+    > แก้ไขไฟล์ `src/app/go.mod`
+    >
+
+    ```go
+    module go-mma
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../shared/common
+    
+    replace go-mma/modules/notification v0.0.0 => ../modules/notification
+    
+    replace go-mma/modules/customer v0.0.0 => ../modules/customer
+    
+    replace go-mma/modules/order v0.0.0 => ../modules/order
+    
+    replace go-mma/shared/contract/customercontract v0.0.0 => ../shared/contract/customer-contract
+    
+    // ...
+    ```
+
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+- รันโปรแกรม `make run`
+
+## การแยกข้อมูลระหว่างโมดูล (Data Isolation)
+
+หลังจากที่เราการกำหนดขอบเขตโมดูลและรูปแบบการสื่อสารที่ชัดเจนแล้ว สิ่งหนึ่งที่มองข้ามไม่ได้คือ **การแยกข้อมูลระหว่างโมดูล ([Data Isolation](https://somprasongd.work/blog/architecture/modular-monolith-data-isolation))** ซึ่งช่วยให้โมดูลมีความเป็นอิสระและมีการผูกแน่นที่หลวม (loosely coupled) สถาปัตยกรรมแบบ Modular Monolith มีกฎที่เข้มงวดสำหรับการรักษาความสมบูรณ์ของข้อมูล:
+
+- แต่ละโมดูลสามารถเข้าถึงได้เฉพาะตารางของตนเองเท่านั้น
+- ไม่มีการแชร์ตารางหรืออ็อบเจกต์ระหว่างโมดูล
+- การ Join สามารถทำได้เฉพาะตารางภายในโมดูลเดียวกันเท่านั้น
+
+ประโยชน์ของการออกแบบนี้คือการส่งเสริมความเป็นโมดูลาร์และการผูกแน่นที่หลวม ทำให้ง่ายต่อการเปลี่ยนแปลงระบบและลดผลข้างเคียงที่ไม่พึงประสงค์
+
+### ระดับการแยกข้อมูล (Data Isolation Levels)
+
+นี่คือสี่แนวทางในการแยกข้อมูลสำหรับ Modular Monoliths
+
+- **Level 1 - Separate Table (ไม่แนะนำ)**
+
+    เป็นวิธีการที่ง่ายที่สุดคือไม่มีการแยกข้อมูลในระดับฐานข้อมูล ทุกตารางของทุกโมดูลจะอยู่ในฐานข้อมูลเดียวกัน ทำให้ยากที่จะระบุว่าตารางใดเป็นของโมดูลใด
+
+    ```bash
+    ┌─────────────────────────────────┐
+    │         Single Database         │
+    │ ┌─────────────────────────────┐ │
+    │ │   Module A - Schema public  │ │
+    │ │  Table A1  Table A2  ...    │ │
+    │ └─────────────────────────────┘ │
+    │ ┌─────────────────────────────┐ │
+    │ │   Module B - Schema public  │ │
+    │ │  Table B1  Table B2  ...    │ │
+    │ └─────────────────────────────┘ │
+    │ ┌─────────────────────────────┐ │
+    │ │   Module B - Schema public  │ │
+    │ │  Table C1  Table C2  ...    │ │
+    │ └─────────────────────────────┘ │
+    └─────────────────────────────────┘
+    ```
+
+- **Level 2 - Separate Schema (Logical Isolation)**
+
+    วิธีนี้เป็นการจัดกลุ่มตารางที่เกี่ยวข้องเข้าด้วยกันในฐานข้อมูลโดยใช้ **Database Schemas** แต่ละโมดูลมี Schema เฉพาะของตนเองที่มีตารางของโมดูลนั้นๆ ทำให้ง่ายต่อการจำแนกว่าตารางใดเป็นของโมดูลใด
+
+    ```bash
+    ┌─────────────────────────────────┐
+    │         Single Database         │
+    │ ┌─────────────────────────────┐ │
+    │ │     Module A - Schema A     │ │
+    │ │  Table A1  Table A2  ...    │ │
+    │ └─────────────────────────────┘ │
+    │ ┌─────────────────────────────┐ │
+    │ │     Module B - Schema B     │ │
+    │ │  Table B1  Table B2  ...    │ │
+    │ └─────────────────────────────┘ │
+    │ ┌─────────────────────────────┐ │
+    │ │     Module C - Schema C     │ │
+    │ │  Table C1  Table C2  ...    │ │
+    │ └─────────────────────────────┘ │
+    └─────────────────────────────────┘
+    ```
+
+- **Level 3 - Separate Database (Physical Isolation)**
+
+    ระดับถัดไปคือการย้ายข้อมูลของแต่ละโมดูลไปยัง **ฐานข้อมูลที่แยกจากกัน** วิธีนี้มีการจำกัดมากกว่าการแยกข้อมูลด้วย Schema และเป็นทางเลือกที่ดีหากคุณต้องการกฎการแยกข้อมูลที่เข้มงวดระหว่างโมดูล
+
+    ```bash
+    ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+    │  Database A     │   │  Database B     │   │  Database C     │
+    │ ┌─────────────┐ │   │ ┌─────────────┐ │   │ ┌─────────────┐ │
+    │ │ Module A    │ │   │ │ Module B    │ │   │ │ Module C    │ │
+    │ │ Table A1    │ │   │ │ Table B1    │ │   │ │ Table C1    │ │
+    │ │ Table A2    │ │   │ │ Table B2    │ │   │ │ Table C2    │ │
+    │ │     ...     │ │   │ │     ...     │ │   │ │     ...     │ │
+    │ └─────────────┘ │   │ └─────────────┘ │   │ └─────────────┘ │
+    └─────────────────┘   └─────────────────┘   └─────────────────┘
+    ```
+
+- **Level 4 - Different Persistence (Polyglot Persistence)**
+
+    วิธีนี้ไปไกลกว่านั้นโดยการใช้ **ฐานข้อมูลประเภทที่แตกต่างกัน** สำหรับแต่ละโมดูล เพื่อแก้ปัญหาเฉพาะทางของแต่ละเรื่อง
+
+    ```bash
+    ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+    │  Database A     │   │  Database B     │   │  Database C     │
+    │ (Relational DB) │   │ (Document DB)   │   │ (Graph DB)      │
+    │ ┌─────────────┐ │   │ ┌─────────────┐ │   │ ┌─────────────┐ │
+    │ │ Module A    │ │   │ │ Module B    │ │   │ │ Module C    │ │
+    │ │ Table A1    │ │   │ │ Doc B1      │ │   │ │ Node C1     │ │
+    │ │ Table A2    │ │   │ │ Doc B2      │ │   │ │ Edge C1     │ │
+    │ │     ...     │ │   │ │     ...     │ │   │ │     ...     │ │
+    │ └─────────────┘ │   │ └─────────────┘ │   │ └─────────────┘ │
+    └─────────────────┘   └─────────────────┘   └─────────────────┘
+    ```
+
+### **Level 2 - Separate Schema (Logical Isolation)**
+
+โดยทั่วไปแล้ว การเริ่มต้นด้วยการแยกข้อมูลแบบ Logical Isolation โดยใช้ Schemas เป็นวิธีที่ง่ายต่อการนำไปใช้และช่วยให้เข้าใจขอบเขตของระบบได้ดีขึ้น และคุณสามารถพิจารณาใช้ฐานข้อมูลแยกกัน (Separate Database) ในภายหลังได้ตามความต้องการของระบบที่เปลี่ยนแปลงไป
+
+**ขั้นตอนการแยก schema**
+
+- สร้างไฟล์ migration สำหรับการแยก schema
+
+    ```bash
+    make mgc filename=separate_schema
+    ```
+
+- เพิ่มคำสั่งสำหรับแยก schema
+
+    > แก้ไขไฟล์ `xxx_separate_schema.up.sql`
+    >
+
+    ```sql
+    -- สร้าง schema ใหม่สำหรับโมดูลลูกค้า
+    CREATE SCHEMA customer;
+    
+    -- ย้ายตาราง 'customers' จาก schema 'public' ไปยัง schema 'customer'
+    ALTER TABLE public.customers SET SCHEMA customer;
+    
+    -- สร้าง schema ใหม่สำหรับโมดูลคำสั่งซื้อ
+    CREATE SCHEMA sales;
+    
+    -- ลบ Foreign Key Constraint เดิมก่อนย้ายตาราง
+    ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS fk_customer;
+    
+    -- ย้ายตาราง 'orders' จาก schema 'public' ไปยัง schema 'order'
+    ALTER TABLE public.orders SET SCHEMA sales;
+    
+    -- หมายเหตุ: ตามหลัก Modular Monolith จะไม่มีการสร้าง Foreign Key ข้ามโมดูล
+    -- การตรวจสอบความถูกต้องของ customer_id จะจัดการที่ระดับแอปพลิเคชัน
+    ```
+
+- เพิ่มคำสั่งสำหรับการย้อนกลับ
+
+    > แก้ไขไฟล์ `xxx_separate_schema.down.sql`
+    >
+
+    ```sql
+    -- ย้ายตาราง 'customers' กลับจาก schema 'customer' ไปยัง 'public'
+    ALTER TABLE customer.customers SET SCHEMA public;
+    
+    -- ลบ schema 'customer' (จะสำเร็จเมื่อ schema ว่างเปล่า)
+    DROP SCHEMA customer;
+    
+    -- ลบ Foreign Key Constraint บน 'sales.orders' ถ้ามีอยู่ (ป้องกันข้อผิดพลาด)
+    ALTER TABLE sales.orders DROP CONSTRAINT IF EXISTS fk_customer;
+    
+    -- ย้ายตาราง 'orders' กลับจาก schema 'sales' ไปยัง 'public'
+    ALTER TABLE sales.orders SET SCHEMA public;
+    
+    -- ลบ schema 'sales' (จะสำเร็จเมื่อ schema ว่างเปล่า)
+    DROP SCHEMA sales;
+    
+    -- เพิ่ม Foreign Key Constraint กลับคืนที่ 'public.sales' โดยอ้างอิง 'public.customers'
+    ALTER TABLE public.orders
+    ADD CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+    ```
+
+- รันคำสั่ง `make mgu` เพิ่มสั่งสร้าง schema และย้ายตาราง
+- ปรับปรุง `CustomerRepository` ให้ใช้ schema ที่ถูกต้อง `public` → `customer`
+
+    > แก้ไขไฟล์ `customer/internal/repository/customer.go`
+    >
+
+    ```go
+    package repository
+    
+    // ...
+    
+    func (r *customerRepository) Create(ctx context.Context, customer *model.Customer) error {
+     query := `
+     INSERT INTO customer.customers (id, email, credit)
+     VALUES ($1, $2, $3)
+     RETURNING *
+     `
+    
+     // ...
+     return nil
+    }
+    
+    func (r *customerRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+     query := `SELECT 1 FROM customer.customers WHERE email = $1 LIMIT 1`
+    
+     // ...
+     return true, nil
+    }
+    
+    func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
+     query := `
+     SELECT *
+     FROM customer.customers
+     WHERE id = $1
+    `
+     // ...
+     return &customer, nil
+    }
+    
+    func (r *customerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
+     query := `
+     UPDATE customer.customers
+     SET credit = $2
+     WHERE id = $1
+     RETURNING *
+    `
+      // ...
+     return nil
+    }
+    
+    ```
+
+- ปรับปรุง `OrderRepository` ให้ใช้ schema ที่ถูกต้อง `public` → `sales`
+
+    > แก้ไขไฟล์ `order/internal/repository/order.go`
+    >
+
+    ```go
+    package repository
+    
+    // ...
+    
+    func (r *orderRepository) FindByID(ctx context.Context, id int64) (*model.Order, error) {
+     query := `
+     SELECT *
+     FROM sales.orders
+     WHERE id = $1
+     AND canceled_at IS NULL -- รายออเดอร์ต้องยังไม่ถูกยกเลิก
+    `
+     // ...
+     return &order, nil
+    }
+    
+    func (r *orderRepository) Cancel(ctx context.Context, id int64) error {
+     query := `
+     UPDATE sales.orders
+     SET canceled_at = current_timestamp -- soft delete record
+     WHERE id = $1
+    `
+     // ...
+     return nil
+    }
+    
+    ```
+
+## การจัดการโมดูล ด้วย Feature-Based Structure + CQRS
+
+ในโครงสร้างเดิม โมดูล `customer` มักรวมทุกฟังก์ชันไว้ภายใน interface เดียวคือ `CustomerService` ซึ่งเมื่อระบบโตขึ้น จะทำให้โค้ดเริ่มยุ่งเหยิงและยากต่อการดูแล
+
+เพื่อให้โมดูลมีความ *แยกส่วน* (modular) และ *ปรับขยายง่าย* มากขึ้น เราจะเปลี่ยนไปใช้แนวทางใหม่ดังนี้
+
+1. **CQRS (Command Query Responsibility Segregation)**
+
+    แยกโค้ดที่ "เขียนข้อมูล" (Command) ออกจาก "อ่านข้อมูล" (Query) อย่างชัดเจน
+
+    - เพิ่มความชัดเจนของ intent (เรากำลังอ่าน หรือเขียน?)
+    - ปรับปรุง performance ฝั่ง read โดยไม่กระทบฝั่ง write
+    - ให้แต่ละส่วนสามารถเปลี่ยนแปลง / ขยาย / ทดสอบ ได้อิสระ
+2. **Mediator Pattern**
+
+    ใช้ Mediator (หรือ Message Bus) เป็น **ตัวกลาง** ในการส่ง Command/Query แทนการเรียก Service ตรงๆ ช่วยลดการผูกติดกันระหว่าง component (decoupling) และรองรับ cross-cutting concerns เช่น logging, transaction, validation
+
+    **ตัวอย่างการใช้งาน**
+
+    ```go
+    // customer/module.go
+    
+    // ลงทะเบียน feature handler สำหรับ query `GetCustomerByID`
+    // โดยผูก handler กับ request type เพื่อให้ mediator เรียกใช้ได้ในภายหลัง
+    mediator.Register(getbyid.NewGetCustomerByIDQueryHandler(repo))
+    ```
+
+    ```go
+    // order/internal/feature/create/command_handler.go
+    
+    // ใช้ mediator เรียก query `GetCustomerByIDQuery` พร้อมกำหนด type ของ request และ response
+    customer, err := mediator.Send[*customercontract.GetCustomerByIDQuery, *customercontract.GetCustomerByIDQueryResult](
+     ctx,
+     &customercontract.GetCustomerByIDQuery{ID: cmd.CustomerID}, // ส่ง request พร้อมข้อมูล customer ID
+    )
+    ```
+
+### **สร้าง Mediator**
+
+สร้างตัวจัดการ `Request/Response` ของแต่ละการเขียนข้อมูล (Command) และ อ่านข้อมูล (Query)
+
+> สร้างไฟล์ `common/mediator/mediator.go`
+>
+
+```go
+package mediator
+
+import (
+ "context"
+ "errors"
+ "fmt"
+ "reflect"
+)
+
+// ใช้แทนกรณีไม่ต้องการ response ใด ๆ
+type NoResponse struct{}
+
+// Interface สำหรับ handler ที่รับ request และ return response
+type RequestHandler[TRequest any, TResponse any] interface {
+ Handle(ctx context.Context, request TRequest) (TResponse, error)
+}
+
+// registry สำหรับเก็บ handler ตาม type ของ request
+var handlers = map[reflect.Type]func(ctx context.Context, req interface{}) (interface{}, error){}
+
+// Register: ผูก handler กับ type ของ request ที่รองรับ
+func Register[TRequest any, TResponse any](handler RequestHandler[TRequest, TResponse]) {
+ var req TRequest // สร้าง zero value เพื่อใช้หา type
+ reqType := reflect.TypeOf(req)
+
+ // wrap handler ให้รองรับ interface{}
+ handlers[reqType] = func(ctx context.Context, request interface{}) (interface{}, error) {
+  typedReq, ok := request.(TRequest)
+  if !ok {
+   return nil, errors.New("invalid request type")
+  }
+  return handler.Handle(ctx, typedReq)
+ }
+}
+
+// Send: dispatch request ไปยัง handler ที่ match กับ type ของ request
+func Send[TRequest any, TResponse any](ctx context.Context, req TRequest) (TResponse, error) {
+ reqType := reflect.TypeOf(req)
+ handler, ok := handlers[reqType]
+ if !ok {
+  var empty TResponse
+  return empty, fmt.Errorf("no handler for request %T", req)
+ }
+
+ result, err := handler(ctx, req)
+ if err != nil {
+  var empty TResponse
+  return empty, err
+ }
+
+ // ตรวจสอบ type ของ response ก่อน return
+ typedRes, ok := result.(TResponse)
+ if !ok {
+  var empty TResponse
+  return empty, errors.New("invalid response type")
+ }
+
+ return typedRes, nil
+}
+```
+
+### วิเคาระห์ Customer Features
+
+นำฟังก์ชันทั้งหมดใน interface `CustomerService` เดิม มาแยกออกเป็น 1 ฟังก์ชัน 1 ฟีเจอร์ ได้ดังนี้
+
+1. **create**: สร้างลูกค้าใหม่
+2. **get-by-id**: ค้นหาลูกค้าจาก ID
+3. **reserve-credit**: ตัดยอด credit
+4. **release-credit**: คืนยอด credit
+
+**โครงสร้างใหม่**
+
+```bash
+customer
+├── domainerrors
+│   └── domainerrors.go             # ไว้รวบรวม error ทั้่งหมด ของ customer
+├── internal
+│   ├── feature                     # สร้างใน internal ป้องกันไม่ให้ import
+│   │   ├── create
+│   │   │   ├── dto.go              # ย้าย dto มาที่นี่
+│   │   │   ├── endpoint.go         # ย้าย http handler มาที่นี่
+│   │   │   ├── command.go          # กำหนดรูปแบบของ Request/Response ของ command
+│   │   │   └── command_handler.go  # จัดการ command handler
+│   │   ├── get-by-id
+│   │   │   └── query_handler.go    # จัดการ query handler
+│   │   ├── release-credit
+│   │   │   └── command_handler.go
+│   │   └── reserve-credit
+│   │       └── command_handler.go
+│   ├── model
+│   │   └── customer.go
+│   └── repository
+│       └── customer.go
+├── test
+│   └── customers.http
+├── module.go          # เปลี่ยนจาก register service เป็น command/query handler แทน
+├── go.mod
+└── go.sum
+```
+
+### สร้าง Customer Domain Error
+
+เริ่มจากรวบรวม error ที่จะเกิดขึ้นทั้งหมดจาก command handler, query handler และ rich model มาไว้ที่เดียวเพื่อสร้าง Domain error และใช้งานร่วมกันทุกฟีเจอร์
+
+> สร้างไฟล์ `customer/domainerrors/domainerrors.go`
+>
+
+```go
+package domainerrors
+
+import "go-mma/shared/common/errs"
+
+var (
+ ErrEmailExists        = errs.ConflictError("email already exists")
+ ErrCustomerNotFound   = errs.ResourceNotFoundError("the customer with given id was not found")
+ ErrInsufficientCredit = errs.BusinessRuleError("insufficient credit")
+)
+```
+
+### สร้างฟีเจอร์ **get-by-id**: ค้นหาลูกค้าจาก ID
+
+ฟีเจอร์นี้ เป็นการค้นหาข้อมูลลูกค้า จัดเป็น Query ตาม CQRS และมีการเรียกใช้ในโมดูล order ด้วย ให้เริ่มจากสร้าง contract ขึ้นมาก่อน
+
+<aside>
+💡
+
+ให้ลบไฟล์ `customercontract/contract.go` เพราะจะเปลี่ยนจาก interface ของ public api contract เป็น struct ของ command กับ query แทน
+
+</aside>
+
+- สร้างไฟล์ `customercontract/query_customer_by_id.go`
+
+    ```go
+    package customercontract
+    
+    type GetCustomerByIDQuery struct {
+     ID int64 `json:"id"`
+    }
+    
+    type GetCustomerByIDQueryResult struct {
+     ID     int64    `json:"id"`
+     Email  string   `json:"email"`
+     Credit int      `json:"credit"`
+    }
+    ```
+
+- สร้างฟีเจอร์ get-by-id โดยการย้าย logic จาก `CustomerService.GetCustomerByID(…)` ออกมาไว้ใน `Handle(…)`
+
+    > สร้างไฟล์ `customer/internal/feature/get-by-id/query_handler.go`
+    >
+
+    ```go
+    package getbyid
+    
+    import (
+     "context"
+     "go-mma/modules/customer/domainerrors"
+     "go-mma/modules/customer/internal/model"
+     "go-mma/modules/customer/internal/repository"
+     "go-mma/shared/contract/customercontract"
+    )
+    
+    type getCustomerByIDQueryHandler struct {
+     custRepo repository.CustomerRepository
+    }
+    
+    func NewGetCustomerByIDQueryHandler(custRepo repository.CustomerRepository) *getCustomerByIDQueryHandler {
+     return &getCustomerByIDQueryHandler{
+      custRepo: custRepo,
+     }
+    }
+    
+    func (h *getCustomerByIDQueryHandler) Handle(ctx context.Context, query *customercontract.GetCustomerByIDQuery) (*customercontract.GetCustomerByIDQueryResult, error) {
+     customer, err := h.custRepo.FindByID(ctx, query.ID)
+     if err != nil {
+      return nil, err
+     }
+     if customer == nil {
+      return nil, domainerrors.ErrCustomerNotFound
+     }
+     return h.newGetCustomerByIDQueryResult(customer), nil
+    }
+    
+    func (h *getCustomerByIDQueryHandler) newGetCustomerByIDQueryResult(customer *model.Customer) *customercontract.GetCustomerByIDQueryResult {
+     return &customercontract.GetCustomerByIDQueryResult{
+      ID:     customer.ID,
+      Email:  customer.Email,
+      Credit: customer.Credit,
+     }
+    }
+    ```
+
+### สร้างฟีเจอร์ **reserve-credit**: ตัดยอด credit
+
+ฟีเจอร์์นี้ เป็นการตัดยอด credit ซึ่งเป็นการอัพเดทค่าในฐานข้อมูล จัดเป็น Command ตาม CQRS และมีการเรียกใช้ในโมดูล order ด้วย ให้เริ่มจากสร้าง contract ขึ้นมาก่อน
+
+- สร้างไฟล์ `customer-contract/command_reserve_credit.go`
+
+    ```go
+    package customercontract
+    
+    type ReserveCreditCommand struct {
+     CustomerID   int64 `json:"customer_id"`
+     CreditAmount int   `json:"credit_amount"`
+    }
+    ```
+
+- สร้างฟีเจอร์ reserve-credit โดยการย้าย logic จาก `CustomerService.ReserveCredit(…)` ออกมาไว้ใน `Handle(…)`
+
+    > สร้างไฟล์ `customer/internal/feature/reserve-credit/command_handler.go`
+    >
+
+    ```go
+    package reservecredit
+    
+    import (
+     "context"
+     "go-mma/modules/customer/domainerrors"
+     "go-mma/modules/customer/internal/repository"
+     "go-mma/shared/common/errs"
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/mediator"
+     "go-mma/shared/common/storage/sqldb/transactor"
+     "go-mma/shared/contract/customercontract"
+    )
+    
+    type reserveCreditCommandHandler struct {
+     transactor transactor.Transactor
+     custRepo   repository.CustomerRepository
+    }
+    
+    func NewReserveCreditCommandHandler(
+     transactor transactor.Transactor,
+     repo repository.CustomerRepository) *reserveCreditCommandHandler {
+     return &reserveCreditCommandHandler{
+      transactor: transactor,
+      custRepo:   repo,
+     }
+    }
+    
+    func (h *reserveCreditCommandHandler) Handle(ctx context.Context, cmd *customercontract.ReserveCreditCommand) (*mediator.NoResponse, error) {
+     err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+      customer, err := h.custRepo.FindByID(ctx, cmd.CustomerID)
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      if customer == nil {
+       return domainerrors.ErrCustomerNotFound
+      }
+    
+      if err := customer.ReserveCredit(cmd.CreditAmount); err != nil {
+       return err
+      }
+    
+      if err := h.custRepo.UpdateCredit(ctx, customer); err != nil {
+       logger.Log.Error(err.Error())
+       return errs.DatabaseFailureError(err.Error())
+      }
+    
+      return nil
+     })
+    
+     return nil, err
+    }
+    
+    ```
+
+### สร้างฟีเจอร์ **release-credit**: คืนยอด credit
+
+ฟีเจอร์์นี้ เป็นการคืนยอด credit ซึ่งเป็นการอัพเดทค่าในฐานข้อมูล จัดเป็น Command ตาม CQRS และมีการเรียกใช้ในโมดูล order ด้วย ให้เริ่มจากสร้าง contract ขึ้นมาก่อน
+
+- สร้างไฟล์ `customer-contract/command_release_credit.go`
+
+    ```go
+    package customercontract
+    
+    type ReleaseCreditCommand struct {
+     CustomerID   int64 `json:"customer_id"`
+     CreditAmount int   `json:"credit_amount"`
+    }
+    ```
+
+- สร้างฟีเจอร์ release-credit โดยการย้าย logic จาก `CustomerService.ReleaseCredit(…)` ออกมาไว้ใน `Handle(…)`
+
+    > สร้างไฟล์ `customer/internal/feature/release-credit/command_handler.go`
+    >
+
+    ```go
+    package releasecredit
+    
+    import (
+     "context"
+     "go-mma/modules/customer/domainerrors"
+     "go-mma/modules/customer/internal/repository"
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/mediator"
+     "go-mma/shared/common/storage/sqldb/transactor"
+     "go-mma/shared/contract/customercontract"
+    )
+    
+    type releaseCreditCommandHandler struct {
+     transactor transactor.Transactor
+     custRepo   repository.CustomerRepository
+    }
+    
+    func NewReleaseCreditCommandHandler(
+     transactor transactor.Transactor,
+     repo repository.CustomerRepository) *releaseCreditCommandHandler {
+     return &releaseCreditCommandHandler{
+      transactor: transactor,
+      custRepo:   repo,
+     }
+    }
+    
+    func (h *releaseCreditCommandHandler) Handle(ctx context.Context, cmd *customercontract.ReleaseCreditCommand) (*mediator.NoResponse, error) {
+     err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+      customer, err := h.custRepo.FindByID(ctx, cmd.CustomerID)
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      if customer == nil {
+       return domainerrors.ErrCustomerNotFound
+      }
+    
+      customer.ReleaseCredit(cmd.CreditAmount)
+    
+      if err := h.custRepo.UpdateCredit(ctx, customer); err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      return nil
+     })
+    
+     return nil, err
+    }
+    ```
+
+### สร้างฟีเจอร์ **create**: สร้างลูกค้าใหม่
+
+ฟีเจอร์์นี้ เป็นการบันทึกข้อมูลลูกค้าใหม่ลงในฐานข้อมูล จัดเป็น Command ตาม CQRS และไม่มีการเรียกใช้ที่โมดูลอื่น จึงไม่จำเป็นต้องมี contract
+
+- เนื่องฟีเจอร์นี้จะมีการเรียกใช้งานผ่าน REST API จึงต้องมี endpoint สำหรับจัดการ request/response ด้วย เริ่มจากย้าย `dto` มาไว้ที่นี้
+
+    > สร้างไฟล์ `customer/internal/feature/create/dto.go`
+    >
+
+    ```go
+    package create
+    
+    import (
+     "errors"
+     "net/mail"
+    )
+    
+    type CreateCustomerRequest struct {
+     Email  string `json:"email"`
+     Credit int    `json:"credit"`
+    }
+    
+    func (r *CreateCustomerRequest) Validate() error {
+     var errs error
+     if r.Email == "" {
+      errs = errors.Join(errs, errors.New("email is required"))
+     }
+     if _, err := mail.ParseAddress(r.Email); err != nil {
+      errs = errors.Join(errs, errors.New("email is invalid"))
+     }
+     if r.Credit <= 0 {
+      errs = errors.Join(errs, errors.New("credit must be greater than 0"))
+     }
+     return errs
+    }
+    
+    type CreateCustomerResponse struct {
+     ID int64 `json:"id"`
+    }
+    ```
+
+- ออกแบบ Command สำหรับฟีเจอร์ create
+
+    > สร้างไฟล์ `customer/internal/feature/create/command.go`
+    >
+
+    ```go
+    package create
+    
+    type CreateCustomerCommand struct {
+     CreateCustomerRequest  // embeded type มาเพราะหน้าตาเหมือนกัน
+    }
+    
+    type CreateCustomerCommandResult struct {
+     CreateCustomerResponse // embeded type มาเพราะหน้าตาเหมือนกัน
+    }
+    
+    // ฟังก์ชันช่วยสร้าง CreateCustomerCommandResult
+    func NewCreateCustomerCommandResult(id int64) *CreateCustomerCommandResult {
+     return &CreateCustomerCommandResult{
+      CreateCustomerResponse{
+       ID: id,
+      },
+     }
+    }
+    ```
+
+- สร้างฟีเจอร์ create
+
+    > สร้างไฟล์ `customer/internal/feature/create/command_handler.go`
+    >
+
+    ```go
+    package create
+    
+    import (
+     "context"
+     "go-mma/modules/customer/domainerrors"
+     "go-mma/modules/customer/internal/model"
+     "go-mma/modules/customer/internal/repository"
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/storage/sqldb/transactor"
+    
+     notiService "go-mma/modules/notification/service"
+    )
+    
+    type createCustomerCommandHandler struct {
+     transactor transactor.Transactor
+     custRepo   repository.CustomerRepository
+     notiSvc    notiService.NotificationService
+    }
+    
+    func NewCreateCustomerCommandHandler(
+     transactor transactor.Transactor,
+     custRepo repository.CustomerRepository,
+     notiSvc notiService.NotificationService) *createCustomerCommandHandler {
+     return &createCustomerCommandHandler{
+      transactor: transactor,
+      custRepo:   custRepo,
+      notiSvc:    notiSvc,
+     }
+    }
+    
+    func (h *createCustomerCommandHandler) Handle(ctx context.Context, cmd *CreateCustomerCommand) (*CreateCustomerCommandResult, error) {
+     // ตรวจสอบ business rule/invariant
+     if err := h.validateBusinessInvariant(ctx, cmd); err != nil {
+      return nil, err
+     }
+    
+     // แปลง Command → Model
+     customer := model.NewCustomer(cmd.Email, cmd.Credit)
+    
+     // ย้ายส่วนที่ติดต่อฐานข้อมูล กับส่งอีเมลมาทำงานใน WithinTransaction
+     err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+    
+      // ส่งไปที่ Repository Layer เพื่อบันทึกข้อมูลลงฐานข้อมูล
+      if err := h.custRepo.Create(ctx, customer); err != nil {
+       // error logging
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      // เพิ่มส่งอีเมลต้อนรับ เข้าไปใน hook แทน การเรียกใช้งานทันที
+      registerPostCommitHook(func(ctx context.Context) error {
+       return h.notiSvc.SendEmail(customer.Email, "Welcome to our service!", map[string]any{
+        "message": "Thank you for joining us! We are excited to have you as a member."})
+      })
+    
+      return nil
+     })
+    
+     if err != nil {
+      return nil, err
+     }
+    
+     return NewCreateCustomerCommandResult(customer.ID), nil
+    }
+    
+    func (h *createCustomerCommandHandler) validateBusinessInvariant(ctx context.Context, cmd *CreateCustomerCommand) error {
+     // ตรวจสอบ email ซ้ำ
+     exists, err := h.custRepo.ExistsByEmail(ctx, cmd.Email)
+     if err != nil {
+      // error logging
+      logger.Log.Error(err.Error())
+      return err
+     }
+    
+     if exists {
+      return domainerrors.ErrEmailExists
+     }
+     return nil
+    }
+    ```
+
+- สร้าง endpoint ของฟีเจอร์นี้
+
+    สร้างไฟล์ `customer/internal/feature/create/endpoint.go`
+
+    ```go
+    package create
+    
+    import (
+     "go-mma/shared/common/errs"
+     "go-mma/shared/common/mediator"
+     "strings"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewEndpoint(router fiber.Router, path string) {
+     router.Post(path, createCustomerHTTPHandler)
+    }
+    
+    func createCustomerHTTPHandler(c fiber.Ctx) error {
+     // แปลง request body -> dto
+     var req dto.CreateCustomerRequest
+     if err := c.Bind().Body(&req); err != nil {
+      // จัดการ error response ที่ middleware
+      return errs.InputValidationError(err.Error())
+     }
+    
+     logger.Log.Info(fmt.Sprintf("Received customer: %v", req))
+    
+     // ตรวจสอบ input fields (e.g., value, format, etc.)
+     if err := req.Validate(); err != nil {
+      // จัดการ error response ที่ middleware
+      return errs.InputValidationError(err.Error())
+     }
+    
+     // *** ส่งไปที่ Command Handler แทน Service ***
+     resp, err := mediator.Send[*CreateCustomerCommand, *CreateCustomerCommandResult](
+      c.Context(),
+      &CreateCustomerCommand{CreateCustomerRequest: req},
+     )
+    
+     // จัดการ error จาก feature หากเกิดขึ้น
+     if err != nil {
+      // จัดการ error response ที่ middleware
+      return err
+     }
+    
+     // ตอบกลับด้วย status code 201 (created) และข้อมูลแบบ JSON
+     return c.Status(fiber.StatusCreated).JSON(resp)
+    }
+    ```
+
+### ปรับแก้การ Init โมดูล Customer
+
+จากเดิมใน `customer/module.go` จะมีการระบุว่าต้องการเปิด service อะไรให้ใช้งานบ้าง เราจะเอาตรงนี้ออกไป(ไม่มี `CustomerService` แล้ว) โดยจะใช้ mediator มาจัดการแทน
+
+```go
+package customer
+
+import (
+ "go-mma/modules/customer/internal/feature/create"
+ getbyid "go-mma/modules/customer/internal/feature/get-by-id"
+ releasecredit "go-mma/modules/customer/internal/feature/release-credit"
+ reservecredit "go-mma/modules/customer/internal/feature/reserve-credit"
+ "go-mma/modules/customer/internal/repository"
+ "go-mma/shared/common/mediator"
+ "go-mma/shared/common/module"
+ "go-mma/shared/common/registry"
+
+ notiModule "go-mma/modules/notification"
+ notiService "go-mma/modules/notification/service"
+
+ "github.com/gofiber/fiber/v3"
+)
+
+func NewModule(mCtx *module.ModuleContext) module.Module {
+ return &moduleImp{mCtx: mCtx}
+}
+
+type moduleImp struct {
+ mCtx *module.ModuleContext
+ // เอา service ออก
+}
+
+func (m *moduleImp) APIVersion() string {
+ return "v1"
+}
+
+func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+ // Resolve NotificationService from the registry
+ notiSvc, err := registry.ResolveAs[notiService.NotificationService](reg, notiModule.NotificationServiceKey)
+ if err != nil {
+  return err
+ }
+
+ repo := repository.NewCustomerRepository(m.mCtx.DBCtx)
+
+  // <-- ตรงนี้
+  // ให้ทำการ register handler เข้า mediator
+ mediator.Register(create.NewCreateCustomerCommandHandler(m.mCtx.Transactor, repo, notiSvc))
+ mediator.Register(getbyid.NewGetCustomerByIDQueryHandler(repo))
+ mediator.Register(reservecredit.NewReserveCreditCommandHandler(m.mCtx.Transactor, repo))
+ mediator.Register(releasecredit.NewReleaseCreditCommandHandler(m.mCtx.Transactor, repo))
+
+ return nil
+}
+
+// ลบ Services() []registry.ProvidedService ออก
+
+func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+ customers := router.Group("/customers")
+ create.NewEndpoint(customers, "")
+}
+```
+
+### ปรับแก้โมดูล Order
+
+ปรับโมดูล Order ให้เรียกใช้ Command/Query ของโมดูล Customer แทนการเรียกจาก service
+
+เริ่มจากแยก `OrderService` เป็นฟีเจอร์
+
+```bash
+order
+├── domainerrors
+│   └── domainerrors.go             # ไว้รวบรวม error ทั้่งหมด ของ order
+├── internal
+│   ├── feature                     # สร้างใน internal ป้องกันไม่ให้ import
+│   │   ├── create
+│   │   │   ├── dto.go              # ย้าย dto มาที่นี่
+│   │   │   ├── endpoint.go         # ย้าย http handler มาที่นี่
+│   │   │   ├── command.go          # กำหนดรูปแบบของ Request/Response ของ command
+│   │   │   └── command_handler.go  # จัดการ command handler
+│   │   └── cancel
+│   │       ├── dto.go              # ย้าย dto มาที่นี่
+│   │       ├── endpoint.go         # ย้าย http handler มาที่นี่
+│   │       ├── command.go          # กำหนดรูปแบบของ Request/Response ของ command
+│   │       └── command_handler.go  # จัดการ command handler
+│   ├── model
+│   │   └── order.go
+│   └── repository
+│       └── order.go
+├── test
+│   └── orders.http
+├── module.go                        # register command/query handler
+├── go.mod
+└── go.sum
+```
+
+- รวบรวม error ทั้งหมดใน feature มาไว้ที่เดียวกัน
+
+    > สร้างไฟล์ `order/domainerrors/domainerrors.go`
+    >
+
+    ```go
+    package domainerrors
+    
+    import "go-mma/shared/common/errs"
+    
+    var (
+     ErrNoOrderID = errs.ResourceNotFoundError("the order with given id was not found")
+    )
+    ```
+
+- สร้างฟีเจอร์ create สำหรับสร้างออเดอร์ใหม่ และมีการเรียกใช้งานผ่าน REST API
+
+    > สร้างไฟล์ `order/internal/feature/create/dto.go`
+    >
+
+    ```go
+    package create
+    
+    import "fmt"
+    
+    type CreateOrderRequest struct {
+     CustomerID int64 `json:"customer_id"`
+     OrderTotal int   `json:"order_total"`
+    }
+    
+    func (r *CreateOrderRequest) Validate() error {
+     if r.CustomerID <= 0 {
+      return fmt.Errorf("customer_id is required")
+     }
+     if r.OrderTotal <= 0 {
+      return fmt.Errorf("order_total must be greater than 0")
+     }
+     return nil
+    }
+    
+    type CreateOrderResponse struct {
+     ID int64 `json:"id"`
+    }
+    ```
+
+    สร้างไฟล์ `order/internal/feature/create/command.go`
+
+    ```go
+    package create
+    
+    type CreateOrderCommand struct {
+     CreateOrderRequest
+    }
+    
+    type CreateOrderCommandResult struct {
+     CreateOrderResponse
+    }
+    
+    func NewCreateOrderCommandResult(id int64) *CreateOrderCommandResult {
+     return &CreateOrderCommandResult{
+      CreateOrderResponse{ID: id},
+     }
+    }
+    ```
+
+    สร้างไฟล์ `order/internal/feature/create/command_handler.go`
+
+    ```go
+    package create
+    
+    import (
+     "context"
+     "go-mma/modules/order/internal/model"
+     "go-mma/modules/order/internal/repository"
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/mediator"
+     "go-mma/shared/common/storage/sqldb/transactor"
+     "go-mma/shared/contract/customercontract"
+    
+     notiService "go-mma/modules/notification/service"
+    )
+    
+    type createOrderCommandHandler struct {
+     transactor transactor.Transactor
+     orderRepo  repository.OrderRepository
+     notiSvc    notiService.NotificationService
+    }
+    
+    func NewCreateOrderCommandHandler(
+     transactor transactor.Transactor,
+     orderRepo repository.OrderRepository,
+     notiSvc notiService.NotificationService) *createOrderCommandHandler {
+     return &createOrderCommandHandler{
+      transactor: transactor,
+      orderRepo:  orderRepo,
+      notiSvc:    notiSvc,
+     }
+    }
+    
+    func (h *createOrderCommandHandler) Handle(ctx context.Context, cmd *CreateOrderCommand) (*CreateOrderCommandResult, error) {
+     // Business Logic Rule: ตรวจสอบ customer id ในฐานข้อมูล
+     customer, err := mediator.Send[*customercontract.GetCustomerByIDQuery, *customercontract.GetCustomerByIDQueryResult](
+      ctx,
+      &customercontract.GetCustomerByIDQuery{ID: cmd.CustomerID},
+     )
+     if err != nil {
+      return nil, err
+     }
+    
+     var order *model.Order
+     err = h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+    
+      // Business Logic Rule: ตัดยอด credit ในตาราง customer
+      if _, err := mediator.Send[*customercontract.ReserveCreditCommand, *mediator.NoResponse](
+       ctx,
+       &customercontract.ReserveCreditCommand{CustomerID: cmd.CustomerID, CreditAmount: cmd.OrderTotal},
+      ); err != nil {
+       return err
+      }
+    
+      // สร้าง order ใหม่ DTO -> Model
+      order = model.NewOrder(cmd.CustomerID, cmd.OrderTotal)
+      
+      // บันทึกลงฐานข้อมูล
+      err := h.orderRepo.Create(ctx, order)
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      // ส่งอีเมลยืนยันหลัง commit
+      registerPostCommitHook(func(ctx context.Context) error {
+       return h.notiSvc.SendEmail(customer.Email, "Order Created", map[string]any{
+        "order_id": order.ID,
+        "total":    order.OrderTotal,
+       })
+      })
+    
+      return nil
+     })
+    
+     if err != nil {
+      return nil, err
+     }
+    
+     return NewCreateOrderCommandResult(order.ID), nil
+    }
+    
+    ```
+
+    สร้างไฟล์ `order/internal/feature/create/endpoint.go`
+
+    ```go
+    package create
+    
+    import (
+     "go-mma/shared/common/errs"
+     "go-mma/shared/common/mediator"
+     "strings"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewEndpoint(router fiber.Router, path string) {
+     router.Post(path, createOrderHTTPHandler)
+    }
+    
+    func createOrderHTTPHandler(c fiber.Ctx) error {
+     // แปลง request body -> struct
+     var req CreateOrderRequest
+     if err := c.Bind().Body(&req); err != nil {
+       // จัดการ error response ที่ middleware
+      return errs.InputValidationError(err.Error())
+     }
+    
+     // ตรวจสอบ input fields (e.g., value, format, etc.)
+     if err := req.Validate(); err != nil {
+       // จัดการ error response ที่ middleware
+      return errs.InputValidationError(err.Error())
+     }
+    
+     // ส่งไปที่ Command Handler
+     resp, err := mediator.Send[*CreateOrderCommand, *CreateOrderCommandResult](
+      c.Context(),
+      &CreateOrderCommand{CreateOrderRequest: req},
+     )
+    
+     // จัดการ error จาก feature หากเกิดขึ้น
+     if err != nil {
+      // จัดการ error response ที่ middleware
+      return err
+     }
+    
+     // ตอบกลับด้วย status code 201 (created) และข้อมูลแบบ JSON
+     return c.Status(fiber.StatusCreated).JSON(resp)
+    }
+    ```
+
+- สร้างฟีเจอร์ cancel สำหรับยกเลิกออเดอร์ และมีการเรียกใช้งานผ่าน REST API
+
+    สร้างไฟล์ `order/internal/feature/cancel/command.go`
+
+    ```go
+    package cancel
+    
+    type CancelOrderCommand struct {
+     ID int64 `json:"id"`
+    }
+    ```
+
+    สร้างไฟล์ `order/internal/feature/cancel/command_handler.go`
+
+    ```go
+    package cancel
+    
+    import (
+     "context"
+     "go-mma/modules/order/domainerrors"
+     "go-mma/modules/order/internal/repository"
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/mediator"
+     "go-mma/shared/common/storage/sqldb/transactor"
+     "go-mma/shared/contract/customercontract"
+    )
+    
+    type cancelOrderCommandHandler struct {
+     transactor transactor.Transactor
+     orderRepo  repository.OrderRepository
+    }
+    
+    func NewCancelOrderCommandHandler(
+     transactor transactor.Transactor,
+     orderRepo repository.OrderRepository) *cancelOrderCommandHandler {
+     return &cancelOrderCommandHandler{
+      transactor: transactor,
+      orderRepo:  orderRepo,
+     }
+    }
+    
+    func (h *cancelOrderCommandHandler) Handle(ctx context.Context, cmd *CancelOrderCommand) (*mediator.NoResponse, error) {
+     err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+      // Business Logic Rule: ตรวจสอบ order id
+      order, err := h.orderRepo.FindByID(ctx, cmd.ID)
+      if err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      if order == nil {
+       return domainerrors.ErrNoOrderID
+      }
+    
+      // ยกเลิก order
+      if err := h.orderRepo.Cancel(ctx, order.ID); err != nil {
+       logger.Log.Error(err.Error())
+       return err
+      }
+    
+      // Business Logic Rule: คืน credit ในตาราง customer
+      if _, err := mediator.Send[*customercontract.ReleaseCreditCommand, *mediator.NoResponse](
+       ctx,
+       &customercontract.ReleaseCreditCommand{CustomerID: order.CustomerID, CreditAmount: order.OrderTotal},
+      ); err != nil {
+       return err
+      }
+    
+      return nil
+     })
+    
+     if err != nil {
+      return nil, err
+     }
+    
+     return nil, nil
+    }
+    ```
+
+    สร้างไฟล์ `order/internal/feature/cancel/endpoint.go`
+
+    ```go
+    package cancel
+    
+    import (
+     "go-mma/shared/common/errs"
+     "go-mma/shared/common/mediator"
+     "strconv"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewEndpoint(router fiber.Router, path string) {
+     router.Delete(path, cancelOrderHTTPHandler)
+    }
+    
+    func cancelOrderHTTPHandler(c fiber.Ctx) error {
+     // ตรวจสอบรูปแบบ orderID
+     orderID, err := strconv.Atoi(c.Params("orderID"))
+     if err != nil {
+      // จัดการ error response ที่ middleware
+      return errs.InputValidationError("invalid order id")
+     }
+    
+     logger.Log.Info(fmt.Sprintf("Cancelling order: %v", orderID))
+    
+     // ส่งไปที่ Command Handler
+     _, err = mediator.Send[*CancelOrderCommand, *mediator.NoResponse](
+      c.Context(),
+      &CancelOrderCommand{ID: int64(orderID)},
+     )
+    
+     // จัดการ error จาก feature หากเกิดขึ้น
+     if err != nil {
+      // จัดการ error response ที่ middleware
+      return err
+     }
+    
+     // ตอบกลับด้วย status code 204 (no content)
+     return c.SendStatus(fiber.StatusNoContent)
+    }
+    ```
+
+- เพิ่มการ register command handlers ทั้งหมด ใน `order/module.go`
+
+    ```go
+    package order
+    
+    import (
+     "go-mma/modules/order/internal/feature/cancel"
+     "go-mma/modules/order/internal/feature/create"
+     "go-mma/modules/order/internal/repository"
+     "go-mma/shared/common/mediator"
+     "go-mma/shared/common/module"
+     "go-mma/shared/common/registry"
+    
+     notiModule "go-mma/modules/notification"
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    func NewModule(mCtx *module.ModuleContext) module.Module {
+     return &moduleImp{mCtx: mCtx}
+    }
+    
+    type moduleImp struct {
+     mCtx *module.ModuleContext
+    }
+    
+    func (m *moduleImp) APIVersion() string {
+     return "v1"
+    }
+    
+    func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+    
+     // Resolve NotificationService from the registry
+     notiSvc, err := registry.ResolveAs[notiService.NotificationService](reg, notiModule.NotificationServiceKey)
+     if err != nil {
+      return err
+     }
+    
+     repo := repository.NewOrderRepository(m.mCtx.DBCtx)
+    
+     mediator.Register(create.NewCreateOrderCommandHandler(m.mCtx.Transactor, repo, notiSvc))
+     mediator.Register(cancel.NewCancelOrderCommandHandler(m.mCtx.Transactor, repo))
+    
+     return nil
+    }
+    
+    func (m *moduleImp) RegisterRoutes(router fiber.Router) {
+     orders := router.Group("/orders")
+     create.NewEndpoint(orders, "")
+     cancel.NewEndpoint(orders, "/:orderID")
+    }
+    ```
+
+### โมดูล Notification
+
+ขอข้ามการแปลงโมดูล notification ไปก่อน
+
+## เพิ่มความยืดหยุ่นด้วยแนวคิด Event-Driven Architecture
+
+ในโค้ดปัจจุบัน เช่น ภายใน `CreateCustomerCommandHandler` ซึ่งมีหน้าที่สร้างลูกค้าใหม่ เรายังใช้รูปแบบการเขียนแบบ **Imperative Style** — คือการสั่งงานโดยตรง เช่น
+
+```go
+h.notiSvc.SendEmail(...)
+```
+
+```bash
++-------------------------------+
+| CreateCustomerCommandHandler  |
++-------------------------------+
+           |
+           | creates Customer
+           v
++-------------------------------+
+|  CustomerRepository           |
++-------------------------------+
+           |
+           | persists to DB
+           v
++-------------------------------+
+|  NotificationService          |
++-------------------------------+
+           |
+           | sends welcome email
+           v
+       External System
+```
+
+แม้จะทำงานได้ดีในระบบขนาดเล็ก แต่แนวทางนี้มีข้อจำกัด
+
+- ตัว Handler ผูกกับ service อื่นโดยตรง (tight coupling)
+- หากต้องเพิ่ม action อื่น เช่น ส่ง SMS หรือบันทึก audit log → ต้องแก้โค้ดตรงนี้เพิ่ม
+- ขัดกับหลัก Single Responsibility
+
+### แนวทางใหม่: เปลี่ยนเป็น Event-Driven
+
+แทนที่จะ “สั่งให้ทำงาน” โดยตรง → ให้ "ประกาศเหตุการณ์" แล้วให้ส่วนอื่นในระบบมารับฟังและจัดการ
+
+ข้อดีของแนวทางนี้
+
+- **ทำให้ระบบ หลวมตัว (loosely coupled):** Handler ไม่รู้ว่ามีใครฟัง event หรือใครจะทำอะไร
+- **ขยายระบบง่าย:** อยากเพิ่ม logic ใหม่ แค่เพิ่ม event handler โดยไม่ต้องแก้ handler เดิม
+- **พร้อมสำหรับ scaling:** สามารถแยกบาง handler ไปทำงาน async หรือใช้ message queue ได้ทันที
+
+### Domain Events
+
+- เป็น event ที่เกิดภายใน domain (bounded context)
+- ใช้เพื่อแจ้งว่า *"สิ่งนี้เกิดขึ้นแล้ว"* (เช่น `CustomerCreated`)
+- ถูก publish และ consume *ในกระบวนการเดียวกัน* (in-process)
+- มักใช้กับ business logic ภายใน
+
+### Integration Events
+
+- ถูกใช้เพื่อสื่อสารข้าม bounded context / microservice
+- ใช้ messaging system เช่น Kafka, RabbitMQ
+- มักเกิดจาก domain event แล้วถูกแปลง (map) เป็น integration event
+- ทำงานแบบ async
+
+### โครงสร้างหลังเพิ่ม Domain Events กับ Integration Events
+
+ตัวอย่าง การแยก logic การส่งอีเมลออกจาก Handler และรองรับการทำงานแบบ asynchronous ซึ่งจะมีขั้นตอนการทำงานแบบนี้
+
+```bash
++-------------------------------+
+| CreateCustomerCommandHandler  |
++-------------------------------+
+           |
+           | creates Customer
+           v
++-------------------------+
+|  Customer Entity        |
+|  + AddDomainEvent()     |
++-------------------------+
+           |
+           | emits domain event
+           v
++-------------------------------+
+| DomainEventDispatcher         |
+| (in-process, synchronous)     |
++-------------------------------+
+           |
+           | calls domain handler
+           v
++------------------------------------------+
+| CustomerCreatedDomainEventHandler        |
+| - Converts to Integration Event          |
+| - Calls EventBus.Publish()               |
++------------------------------------------+
+           |
+           | emits async message (Kafka/Outbox)
+           v
++------------------------------+
+|  NotificationService         |
+| (another module/microservice)|
++------------------------------+
+           |
+           | sends welcome email
+           v
+       External System
+```
+
+1. `CreateCustomerHandler` → สร้าง Customer และเพิ่ม `CustomerCreated` domain event
+2. `DomainEventDispatcher` → dispatch event นี้ให้ `CustomerCreatedDomainEventHandler`
+3. Handler → สร้าง `CustomerCreatedIntegrationEvent` แล้วส่งผ่าน EventBus
+4. ระบบภายนอก (เช่น Notification Module) consume แล้วจัดการเรื่อง Email
+
+## Refactor เพิ่ม Domain Event
+
+การทำ Domain Event ให้สมบูรณ์ในระบบที่ใช้ DDD (Domain-Driven Design) และ Event-Driven Architecture มีองค์ประกอบหลัก ดังนี้
+
+1. **Domain Event**
+    - เป็น struct ที่บรรยายเหตุการณ์ที่ “เกิดขึ้นแล้ว” ใน domain
+    - อยู่ใน layer `domain` หรือ `internal/domain/event`
+2. **Aggregate/Entity ที่สร้าง Event**
+    - Entity เช่น `Customer` ต้องมีช่องทางในการเก็บ domain events (เช่น slice `[]DomainEvent`)
+    - เมื่อเกิดเหตุการณ์ ให้ `append()` ลงไป
+3. **DomainEvent Interface**
+    - ใช้เป็น abstraction สำหรับ event ทั้งหมด เช่น: มี method `EventName()` หรือ `OccurredAt()`
+4. **Event Dispatcher**
+    - ดึง events จาก aggregate แล้ว dispatch ไปยังผู้รับ (handler)
+5. **Event Handler**
+    - โค้ดที่รับ event และทำงานตอบสนอง
+    - อยู่ใน layer `domain` หรือ `internal/domain/eventhandler`
+6. **Trigger Point**
+    - จุดที่ pull domain events เพื่อนำไปส่งผ่าน dispatcher (มักอยู่หลัง transaction สำเร็จ)
+7. **Dispatch Events มี 2 แนวทางหลัก**
+    - ภายใน transaction (immediate dispatch) เหมาะกับ use case ที่ event handler แค่ปรับ state ภายใน เช่น update model อื่น ซึ่งจะ coupling กับ transaction logic ถ้า event handler fail จะต้อง rollback transaction ด้วย
+    - หลังจาก commit แล้ว คือ ดึง domain events → รอ DB commit → dispatch เช่น post-commit hook เหมาะกับ handler ที่มี side-effect เช่น ส่งอีเมล, call external service แต่ต้องมีการจัดการ error และ retry เอง แยกออกมาจาก transaction logic
+
+### DomainEvent Interface
+
+ใช้เป็น abstraction สำหรับ event ทั้งหมด เช่น: มี method `EventName()` หรือ `OccurredAt()`
+
+- สร้างไฟล์ `common/domain/event.go`
+
+    ```go
+    package domain
+    
+    import "time"
+    
+    // EventName คือ alias ของ string เพื่อใช้แทนชื่อ event เช่น "CustomerCreated", "OrderPlaced" เป็นต้น
+    type EventName string
+    
+    // DomainEvent เป็น interface สำหรับ event ที่เกิดขึ้นใน domain (Domain Event ตาม DDD)
+    // ใช้เพื่อให้สามารถบันทึกหรือส่ง event ได้ โดยไม่ต้องรู้โครงสร้างภายใน
+    type DomainEvent interface {
+     EventName() EventName     // คืนชื่อ event
+     OccurredAt() time.Time    // คืนเวลาที่ event เกิด
+    }
+    
+    // BaseDomainEvent เป็น struct พื้นฐานที่ implement DomainEvent
+    // ใช้ฝังใน struct อื่นๆ ที่เป็น event เพื่อ reuse method ได้
+    type BaseDomainEvent struct {
+     Name EventName   // ชื่อของ event เช่น "UserRegistered"
+     At   time.Time   // เวลาที่ event นี้เกิดขึ้น
+    }
+    
+    // EventName คืนชื่อของ event นี้
+    func (e BaseDomainEvent) EventName() EventName {
+     return e.Name
+    }
+    
+    // OccurredAt คืนเวลาที่ event นี้เกิดขึ้น
+    // ใช้แบบ value receiver ด้วยเหตุผลเดียวกันกับข้างต้น
+    func (e BaseDomainEvent) OccurredAt() time.Time {
+     return e.At
+    }
+    
+    ```
+
+    <aside>
+    💡
+
+    ใช้ **value receiver** เพราะ struct เล็ก ไม่มี mutation และปลอดภัยในเชิง concurrent
+
+    </aside>
+
+### Aggregate
+
+`Aggregate` เป็น **ฐานแม่แบบ (base struct)** สำหรับ aggregate root ทุกตัว เช่น `Customer`, `Order` ฯลฯ จะทำหน้าที่ **บันทึกเหตุการณ์ที่เกิดขึ้น (Domain Events)** เพื่อให้ layer ภายนอก (เช่น Application หรือ Infrastructure) นำไปประมวลผลต่อ
+
+- สร้างไฟล์ `common/domain/aggregate.go`
+
+    ```go
+    package domain
+    
+    // Aggregate เป็น struct พื้นฐานสำหรับ aggregate root ทั้งหมดใน DDD
+    // ใช้เพื่อเก็บรวบรวม domain events ที่เกิดขึ้นภายใน aggregate
+    type Aggregate struct {
+     domainEvents []DomainEvent // เก็บรายการของ event ที่เกิดขึ้นใน aggregate นี้
+    }
+    
+    // AddDomainEvent ใช้สำหรับเพิ่ม domain event เข้าไปใน aggregate
+    // ฟังก์ชันนี้จะถูกเรียกภายใน method อื่น ๆ ของ aggregate เมื่อต้องการประกาศว่า event บางอย่างได้เกิดขึ้นแล้ว
+    func (a *Aggregate) AddDomainEvent(dv DomainEvent) {
+     // สร้าง slice เปล่าหากยังไม่มี
+     if a.domainEvents == nil {
+      a.domainEvents = make([]DomainEvent, 0)
+     }
+    
+     // เพิ่ม event ลงใน slice
+     a.domainEvents = append(a.domainEvents, dv)
+    }
+    
+    // PullDomainEvents จะดึง domain events ทั้งหมดออกจาก aggregate
+    // พร้อมกับเคลียร์ events เหล่านั้นจาก memory (เพราะ events ถูกส่งออกไปแล้ว)
+    // เหมาะสำหรับใช้ใน layer ที่ทำการ publish หรือ persist event
+    func (a *Aggregate) PullDomainEvents() []DomainEvent {
+     events := a.domainEvents    // ดึง event ทั้งหมดที่บันทึกไว้
+     a.domainEvents = nil        // เคลียร์ event list เพื่อป้องกันการส่งซ้ำ
+     return events
+    }
+    ```
+
+### Event Dispatcher
+
+สำหรับการ register handler และ dispatch ไปยังผู้รับ (handler)
+
+- สร้างไฟล์ `common/domain/event_dispatcher.go`
+
+    ```go
+    package domain
+    
+    import (
+     "context"
+     "fmt"
+     "sync"
+    )
+    
+    // Error ที่ใช้ตรวจสอบความถูกต้องของ event
+    var (
+     ErrInvalidEvent = fmt.Errorf("invalid domain event")
+    )
+    
+    // DomainEventHandler คือ interface ที่ทุก handler ของ event ต้อง implement
+    // โดยจะมี method เดียวคือ Handle เพื่อรับ event และทำงานตาม logic ที่ต้องการ
+    type DomainEventHandler interface {
+     Handle(ctx context.Context, event DomainEvent) error
+    }
+    
+    // DomainEventDispatcher คือ interface สำหรับระบบที่ทำหน้าที่กระจาย (dispatch) event
+    // โดยสามารถ register handler สำหรับแต่ละ EventName และ dispatch หลาย event พร้อมกันได้
+    type DomainEventDispatcher interface {
+     Register(eventType EventName, handler DomainEventHandler)
+     Dispatch(ctx context.Context, events []DomainEvent) error
+    }
+    
+    // simpleDomainEventDispatcher เป็น implementation ง่าย ๆ ของ DomainEventDispatcher
+    // ใช้ map เก็บ handler แยกตาม EventName
+    type simpleDomainEventDispatcher struct {
+     handlers map[EventName][]DomainEventHandler // แผนที่ของ EventName ไปยัง handler หลายตัว
+     mu       sync.RWMutex                       // ใช้ mutex เพื่อป้องกัน concurrent read/write
+    }
+    
+    // NewSimpleDomainEventDispatcher สร้าง instance ใหม่ของ dispatcher
+    func NewSimpleDomainEventDispatcher() DomainEventDispatcher {
+     return &simpleDomainEventDispatcher{
+      handlers: make(map[EventName][]DomainEventHandler),
+     }
+    }
+    
+    // Register ใช้สำหรับลงทะเบียน handler กับ EventName
+    // Handler จะถูกเรียกเมื่อมี event นั้น ๆ ถูก dispatch
+    func (d *simpleDomainEventDispatcher) Register(eventType EventName, handler DomainEventHandler) {
+     d.mu.Lock()
+     defer d.mu.Unlock()
+    
+     // เพิ่ม handler ไปยัง slice ของ event นั้น ๆ
+     d.handlers[eventType] = append(d.handlers[eventType], handler)
+    }
+    
+    // Dispatch รับ slice ของ event แล้ว dispatch ไปยัง handler ที่ลงทะเบียนไว้
+    // ถ้ามี handler มากกว่าหนึ่งตัวสำหรับ event เดียวกัน จะเรียกทุกตัว
+    func (d *simpleDomainEventDispatcher) Dispatch(ctx context.Context, events []DomainEvent) error {
+     for _, event := range events {
+      // อ่าน handler ของ event นี้ (copy slice เพื่อป้องกัน concurrent modification)
+      d.mu.RLock()
+      handlers := append([]DomainEventHandler(nil), d.handlers[event.EventName()]...)
+      d.mu.RUnlock()
+    
+      // เรียก handler แต่ละตัว
+      for _, handler := range handlers {
+       err := func(h DomainEventHandler) error {
+        // หาก handler ทำงานผิดพลาด จะคืน error พร้อมระบุ event ที่ผิด
+        err := h.Handle(ctx, event)
+        if err != nil {
+         return fmt.Errorf("error handling event %s: %w", event.EventName(), err)
+        }
+        return nil
+       }(handler)
+    
+       // หากมี error จาก handler ใด ๆ จะหยุดและ return เลย
+       if err != nil {
+        return err
+       }
+      }
+     }
+    
+     // ถ้าไม่มี error เลย ส่ง nil กลับ
+     return nil
+    }
+    ```
+
+### Domain Event
+
+- สร้าง domain event สำหรับเมื่อสร้างลูกค้าใหม่สำเร็จ
+
+    > สร้างไฟล์ `customer/internal/domain/event/customer_created.go`
+    >
+
+    ```go
+    package event
+    
+    import (
+     "go-mma/shared/common/domain"
+     "time"
+    )
+    
+    // กำหนดชื่อ Event ที่ใช้ในระบบ (EventName)
+    // เพื่อระบุชนิดของ Domain Event ว่าเป็น "CustomerCreated"
+    const (
+     CustomerCreatedDomainEventType domain.EventName = "CustomerCreated"
+    )
+    
+    // CustomerCreatedDomainEvent คือ struct ที่เก็บข้อมูลของเหตุการณ์
+    // ที่เกิดขึ้นเมื่อมีการสร้าง Customer ใหม่ในระบบ
+    type CustomerCreatedDomainEvent struct {
+     domain.BaseDomainEvent // ฝัง BaseDomainEvent ที่มีชื่อและเวลาเกิด event
+     CustomerID int64       // ID ของ Customer ที่ถูกสร้าง
+     Email      string      // Email ของ Customer ที่ถูกสร้าง
+    }
+    
+    // NewCustomerCreatedDomainEvent สร้าง instance ใหม่ของ CustomerCreatedDomainEvent
+    // โดยรับ customer ID และ email เป็น input และตั้งชื่อ event กับเวลาปัจจุบันอัตโนมัติ
+    func NewCustomerCreatedDomainEvent(custID int64, email string) *CustomerCreatedDomainEvent {
+     return &CustomerCreatedDomainEvent{
+      BaseDomainEvent: domain.BaseDomainEvent{
+       Name: CustomerCreatedDomainEventType, // กำหนดชื่อ event
+       At:   time.Now(),                      // เวลาเกิด event ณ ปัจจุบัน
+      },
+      CustomerID: custID, // กำหนด customer ID
+      Email:      email,  // กำหนด email
+     }
+    }
+    ```
+
+- ปรับโมเดล `Customer` ให้เป็น `Aggregate` เพื่อเพิ่มเหตุการณ์  “CustomerCreated” ณ ตอนสร้างโมเดล
+
+    > แก้ไขไฟล์ `customer/internal/model/customer.go`
+    >
+
+    ```go
+    package model
+    
+    import (
+     "go-mma/modules/customer/internal/domain/event"
+     "go-mma/shared/common/domain"
+     "go-mma/shared/common/errs"
+     "go-mma/shared/common/idgen"
+     "time"
+    )
+    
+    type Customer struct {
+     ID        int64     `db:"id"` // tag db ใช้สำหรับ StructScan() ของ sqlx
+     Email     string    `db:"email"`
+     Credit    int       `db:"credit"`
+     CreatedAt time.Time `db:"created_at"`
+     UpdatedAt time.Time `db:"updated_at"`
+     domain.Aggregate    // embed: เพื่อให้กลายเป็น Aggregate ของ Customer
+    }
+    
+    func NewCustomer(email string, credit int) *Customer {
+     customer := &Customer{
+      ID:     idgen.GenerateTimeRandomID(),
+      Email:  email,
+      Credit: credit,
+     }
+    
+     // เพิ่มเหตุการณ์ "CustomerCreated"
+     customer.AddDomainEvent(event.NewCustomerCreatedDomainEvent(customer.ID, customer.Email))
+    
+     return customer
+    }
+    
+    func (c *Customer) ReserveCredit(v int) error {
+     // ...
+    }
+    
+    func (c *Customer) ReleaseCredit(v int) {
+     // ...
+    }
+    ```
+
+### Domain Event Handler
+
+สำหรับโค้ดที่รับ event “`CustomerCreated`” มาทำงานต่อ
+
+> สร้างไฟล์ `customer/internal/domain/eventhandler/customer_created_handler.go`
+>
+
+```go
+package eventhandler
+
+import (
+ "context"
+ "go-mma/modules/customer/internal/domain/event"
+ notiService "go-mma/modules/notification/service"
+ "go-mma/shared/common/domain"
+)
+
+// customerCreatedDomainEventHandler คือ handler สำหรับจัดการ event ประเภท CustomerCreatedDomainEvent
+type customerCreatedDomainEventHandler struct {
+ notiSvc notiService.NotificationService // service สำหรับส่งการแจ้งเตือน (เช่น อีเมล)
+}
+
+// NewCustomerCreatedDomainEventHandler คือฟังก์ชันสร้าง instance ของ handler นี้
+func NewCustomerCreatedDomainEventHandler(notiSvc notiService.NotificationService) domain.DomainEventHandler {
+ return &customerCreatedDomainEventHandler{
+  notiSvc: notiSvc,
+ }
+}
+
+// Handle คือฟังก์ชันหลักที่ถูกเรียกเมื่อมี event ถูก dispatch มา
+func (h *customerCreatedDomainEventHandler) Handle(ctx context.Context, evt domain.DomainEvent) error {
+ // แปลง (type assert) event ที่รับมาเป็น pointer ของ CustomerCreatedDomainEvent
+ e, ok := evt.(*event.CustomerCreatedDomainEvent)
+ if !ok {
+  // ถ้าไม่ใช่ event ประเภทนี้ ให้ส่ง error กลับไป
+  return domain.ErrInvalidEvent
+ }
+
+ // เรียกใช้ service ส่งอีเมลต้อนรับลูกค้าใหม่
+ if err := h.notiSvc.SendEmail(e.Email, "Welcome to our service!", map[string]any{
+  "message": "Thank you for joining us! We are excited to have you as a member.",
+ }); err != nil {
+  // หากส่งอีเมลไม่สำเร็จ ส่ง error กลับไป
+  return err
+ }
+
+ // ถ้าสำเร็จทั้งหมด ให้คืน nil (ไม่มี error)
+ return nil
+}
+```
+
+### Trigger Point
+
+เป็นจุดที่ดึงเอา domain events ออกมาหลังจาก transaction logic ทั้งหมดทำงานเสร็จแล้ว แต่ยังไม่ได้ commit
+
+> แก้ไขไฟล์ `customer/internal/feature/create/handler.go`
+>
+
+```go
+package create
+
+// ...
+
+func (h *createCustomerCommandHandler) Handle(ctx context.Context, cmd *CreateCustomerCommand) (*CreateCustomerCommandResult, error) {
+ // ...
+ err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+
+  // ส่งไปที่ Repository Layer เพื่อบันทึกข้อมูลลงฐานข้อมูล
+  if err := h.custRepo.Create(ctx, customer); err != nil {
+   // error logging
+   logger.Log.Error(err.Error())
+   return err
+  }
+  
+  // เพิ่มตรงนี้ หลังจากบันทึกสำเร็จแล้ว
+
+  // ดึง domain events จาก customer model
+  events := customer.PullDomainEvents()
+
+  return nil
+ })
+
+ // ..
+}
+```
+
+### Dispatch Events
+
+เนื่องจาก domain event handler ที่สร้างมาจะเป็นการส่งอีเมล ซึ่งมี side-effect จึงเหมาะกับแบบ post-commit dispatch หรือ รอให้ DB commit ก่อนค่อย dispatch
+
+- แก้ไขไฟล์ `customer/internal/feature/create/handler.go`
+
+    ```go
+    package create
+    
+    import (
+     "context"
+     "go-mma/modules/customer/domainerrors"
+     "go-mma/modules/customer/internal/model"
+     "go-mma/modules/customer/internal/repository"
+     "go-mma/shared/common/domain" // เพิ่มตรงนี้
+     "go-mma/shared/common/logger"
+     "go-mma/shared/common/storage/sqldb/transactor"
+    )
+    
+    type createCustomerCommandHandler struct {
+     transactor transactor.Transactor
+     custRepo   repository.CustomerRepository
+     dispatcher domain.DomainEventDispatcher // เพิ่มตรงนี้ มีการใช้ dispatcher
+    }
+    
+    func NewCreateCustomerCommandHandler(
+     transactor transactor.Transactor,
+     custRepo repository.CustomerRepository,
+     dispatcher domain.DomainEventDispatcher, // เพิ่มตรงนี้
+    ) *createCustomerCommandHandler {
+     return &createCustomerCommandHandler{
+      transactor: transactor,
+      custRepo:   custRepo,
+      dispatcher: dispatcher, // เพิ่มตรงนี้
+     }
+    }
+    
+    func (h *createCustomerCommandHandler) Handle(ctx context.Context, cmd *CreateCustomerCommand) (*CreateCustomerCommandResult, error) {
+     // ...
+     err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
+      // ...
+      // ดึง domain events จาก customer model
+      events := customer.PullDomainEvents()
+    
+      // ให้ dispatch หลัง commit แล้ว
+      registerPostCommitHook(func(ctx context.Context) error {
+       return h.dispatcher.Dispatch(ctx, events)
+      })
+    
+      return nil
+     })
+    
+     // ..
+    }
+    ```
+
+### Register domain event
+
+เนื่องจาก domain events เป็นการทำงานเฉพาะในโมดูลนั้นๆ เท่านั้น ดังนั้น ให้สร้าง dispatcher แยกของแต่ละโมดูลได้เลย
+
+- แก้ไขไฟล์ `customer/module.go`
+
+    ```go
+    package customer
+    
+    import (
+     "go-mma/modules/customer/internal/domain/event"         // เพิ่มตรงนี้่
+     "go-mma/modules/customer/internal/domain/eventhandler"  // เพิ่มตรงนี้่
+     "go-mma/modules/customer/internal/feature/create"
+     getbyid "go-mma/modules/customer/internal/feature/get-by-id"
+     releasecredit "go-mma/modules/customer/internal/feature/release-credit"
+     reservecredit "go-mma/modules/customer/internal/feature/reserve-credit"
+     "go-mma/modules/customer/internal/repository"
+     "go-mma/shared/common/domain"                           // เพิ่มตรงนี้่
+     "go-mma/shared/common/mediator"
+     "go-mma/shared/common/module"
+     "go-mma/shared/common/registry"
+    
+     notiModule "go-mma/modules/notification"
+     notiService "go-mma/modules/notification/service"
+    
+     "github.com/gofiber/fiber/v3"
+    )
+    
+    // ...
+    
+    func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+     // Resolve NotificationService from the registry
+     // ...
+    
+     // เพิ่มตรงนี้่
+     // สร้าง Domain Event Dispatcher สำหรับโมดูลนี้โดยเฉพาะ
+     // เราจะไม่ใช้ dispatcher กลาง แต่จะสร้าง dispatcher แยกในแต่ละโมดูลแทน
+     // เพื่อให้โมดูลนั้นๆ ควบคุมการลงทะเบียนและการจัดการ event handler ได้เองอย่างอิสระ
+     dispatcher := domain.NewSimpleDomainEventDispatcher()
+    
+     // ลงทะเบียน handler สำหรับ event CustomerCreatedDomainEventType ใน dispatcher ของโมดูลนี้
+     dispatcher.Register(event.CustomerCreatedDomainEventType, eventhandler.NewCustomerCreatedDomainEventHandler(notiSvc))
+    
+     // สร้าง repository ของโมดูลนี้
+     repo := repository.NewCustomerRepository(m.mCtx.DBCtx)
+    
+     // ลงทะเบียน command handler และส่ง dispatcher เข้าไปใน handler ด้วย
+     // เพื่อให้ handler สามารถ dispatch event ผ่าน dispatcher ของโมดูลนี้ได้
+     mediator.Register(create.NewCreateCustomerCommandHandler(m.mCtx.Transactor, repo, dispatcher))
+     
+     // ...
+    }
+    ```
+
+## Refactor เพิ่ม Integration Event
+
+ในการทำ Integration Event ใน Event-Driven Architecture (EDA) มีหลาย รูปแบบ (patterns) ที่สามารถเลือกใช้ได้ ขึ้นอยู่กับความ ซับซ้อนของระบบ, ระดับการ decouple, และ ความน่าเชื่อถือที่ต้องการ โดยทั่วไปสามารถแบ่งได้เป็น 3 รูปแบบหลัก ๆ ดังนี้
+
+1. **In-Memory Event Bus (Monolith)**
+
+    **ลักษณะ**
+
+    - Event ถูกส่งแบบ in-process (memory) ไปยัง handler ที่ลงทะเบียนไว้ใน runtime เดียวกัน
+    - ใช้ในระบบ monolith หรือระบบที่แยกโมดูลแต่ยังรันใน process เดียว
+
+    **ข้อดี**
+
+    - ง่าย
+    - เร็ว
+
+    **ข้อเสีย**
+
+    - ไม่ทนต่อ crash
+    - ถ้า handler พังหรือ panic → ไม่มี retry
+    - ไม่สามารถ scale ข้าม service/process ได้
+2. **Outbox Pattern (Reliable Messaging in Monolith / Microservices)**
+
+    **ลักษณะ**
+
+    - เมื่อมี event เกิดขึ้น → บันทึกทั้ง business data + integration event ใน transaction เดียวกัน
+    - Event ถูกเก็บใน outbox table
+    - Worker (หรือ background process) คอยอ่านและส่งไปยัง message broker (Kafka, RabbitMQ)
+
+    **ข้อดี**
+
+    - ปลอดภัย (atomic): business data + event commit พร้อมกัน
+    - ทนต่อ crash
+    - Decouple services ได้ (publish ไป Kafka)
+
+    **ข้อเสีย**
+
+    - ต้องมี worker ดึงและส่ง
+    - ซับซ้อนกว่า in-memory
+3. **Change Data Capture (CDC)**
+
+    **ลักษณะ**
+
+    - ใช้ระบบอย่าง Debezium หรือ Kafka Connect ฟังการเปลี่ยนแปลงใน DB (ผ่าน WAL หรือ binlog)
+    - เมื่อมี insert/update → สร้างเป็น event และส่งออกไป message broker
+
+    **ข้อดี**
+
+    - ไม่ต้องมี Worker (หรือ background process) คอยอ่านและส่งไปยัง message broker
+    - มองเห็นทุกการเปลี่ยนแปลงของฐานข้อมูล
+
+    **ข้อเสีย**
+
+    - ต้องจัดการ schema evolution และ data format ให้ดี
+
+### In-Memory Event Bus (Monolith)
+
+ในบทความนี้จะเลือกใช้วิธีแบบ In-Memory Event Bus เพราะระบบเป็น Monolith และง่ายต่อการทำความเข้าใจ
+
+การทำ Integration Event แบบ In-Memory Event Bus ภายใน Monolith คือการสื่อสารระหว่างโมดูล (bounded contexts) โดยไม่ใช้ messaging system ภายนอก เช่น Kafka หรือ RabbitMQ แต่ยังแยก "Integration Event" ออกจาก "Domain Event" เพื่อรักษา separation of concerns
+
+มีองค์ประกอบหลัก ดังนี้
+
+1. **Integration Event**
+    - เป็น struct ที่ใช้สื่อสารข้ามโมดูล (context) ภายในระบบเดียวกัน
+    - มี payload ที่ module ปลายทางต้องใช้ เช่น `CustomerCreatedIntegrationEvent`
+2. **Integration Event Interface**
+    - ใช้เป็น abstraction สำหรับ event ทั้งหมด เช่น: มี method `EventID()`หรือ `EventName()` หรือ `OccurredAt()`
+3. **Event Bus (In-Memory Implementation)**
+    - ตัวกลางในการ publish → ไปยัง handler ที่ลงทะเบียนไว้
+    - เก็บ handler เป็น map จาก event name → handler list
+4. **Register / Subscribe**
+    - Module ที่สนใจ event ต้องลงทะเบียน handler ไว้กับ EventBus
+5. **Publish**
+    - เมื่อ module ต้นทางสร้าง event แล้วเรียก `eventBus.Publish(...)`
+    - EventBus จะกระจาย event ไปยัง handler ที่ลงทะเบียนไว้
+6. **Event Handlers**
+    - แต่ละ handler มี logic ของตัวเอง เช่นส่งอีเมล
+
+### สร้าง Integration Event Interface
+
+- ใช้เป็น abstraction สำหรับ event ทั้งหมด เช่น: มี method `EventID()`หรือ `EventName()` หรือ `OccurredAt()`
+- สร้างไฟล์ `common/eventbus/event.go`
+
+    ```go
+    package eventbus
+    
+    import (
+     "time"
+    )
+    
+    // EventName เป็นชนิดข้อมูลสำหรับชื่อ event
+    type EventName string
+    
+    // Event คือ interface สำหรับ event ทั่วไปในระบบ
+    // ต้องมี method สำหรับดึงข้อมูล ID, ชื่อ event, และเวลาที่เกิด event
+    type Event interface {
+     EventID() string       // คืนค่า ID ของ event (เช่น UUID หรือ ULID)
+     EventName() EventName  // คืนค่าชื่อ event เช่น "CustomerCreated"
+     OccurredAt() time.Time // เวลาที่ event นั้นเกิดขึ้น
+    }
+    
+    // BaseEvent คือ struct พื้นฐานที่ใช้เก็บข้อมูล event ทั่วไป
+    // สามารถนำไปฝังใน struct event ที่เฉพาะเจาะจงได้
+    type BaseEvent struct {
+     ID   string    // รหัส event แบบ unique (UUID/ULID)
+     Name EventName // ชื่อของ event เช่น "CustomerCreated"
+     At   time.Time // เวลาที่ event เกิดขึ้น
+    }
+    
+    // EventID คืนค่า ID ของ event
+    func (e BaseEvent) EventID() string {
+     return e.ID
+    }
+    
+    // EventName คืนค่าชื่อของ event
+    func (e BaseEvent) EventName() EventName {
+     return e.Name
+    }
+    
+    // OccurredAt คืนค่าเวลาที่ event เกิดขึ้น
+    func (e BaseEvent) OccurredAt() time.Time {
+     return e.At
+    }
+    ```
+
+### สร้าง EventBus (In-Memory Implementation)
+
+สำหรับเป็นตัวกลางในการ publish → ไปยัง handler ที่ลงทะเบียนไว้
+
+- สร้างไฟล์ `common/eventbus/eventbus.go`
+
+    ```go
+    package eventbus
+    
+    import (
+     "context"
+    )
+    
+    // IntegrationEventHandler คือ interface สำหรับ handler ที่จะรับผิดชอบการจัดการ Integration Event
+    // จะต้องมี method Handle เพื่อรับ context และ event ที่ต้องการจัดการ
+    type IntegrationEventHandler interface {
+     Handle(ctx context.Context, event Event) error
+    }
+    
+    // EventBus คือ interface สำหรับระบบ event bus ที่ใช้ในการ publish และ subscribe event ต่างๆ
+    type EventBus interface {
+     // Publish ใช้สำหรับส่ง event ออกไปยังระบบ event bus
+     // โดยรับ context และ event ที่จะส่ง
+     Publish(ctx context.Context, event Event) error
+    
+     // Subscribe ใช้สำหรับลงทะเบียน handler สำหรับ event ที่มีชื่อ eventName
+     // เมื่อมี event ที่ตรงกับชื่อ eventName เข้ามา handler ที่ลงทะเบียนไว้จะถูกเรียกใช้
+     Subscribe(eventName EventName, handler IntegrationEventHandler)
+    }
+    
+    ```
+
+- สร้างไฟล์ `common/eventbus/in_memory_eventbus.go`
+
+    ```go
+    package eventbus
+    
+    import (
+     "context"
+     "log"
+     "sync"
+    )
+    
+    // implementation ของ EventBus แบบง่าย ๆ ที่เก็บ subscriber ไว้ใน memory
+    type inmemoryEventBus struct {
+     subscribers map[EventName][]IntegrationEventHandler // เก็บ eventName กับ list ของ handler
+     mu          sync.RWMutex                            // mutex สำหรับป้องกัน concurrent access
+    }
+    
+    // สร้าง instance ใหม่ของ inmemoryEventBus พร้อม map subscribers ว่าง ๆ
+    func NewInMemoryEventBus() EventBus {
+     return &inmemoryEventBus{
+      subscribers: make(map[EventName][]IntegrationEventHandler),
+     }
+    }
+    
+    // Subscribe ใช้ลงทะเบียน handler สำหรับ event ที่มีชื่อ eventName
+    // โดยจะเพิ่ม handler เข้าไปใน map subscribers
+    func (eb *inmemoryEventBus) Subscribe(eventName EventName, handler IntegrationEventHandler) {
+     eb.mu.Lock()
+     defer eb.mu.Unlock()
+    
+     // เพิ่ม handler เข้า slice ของ eventName นั้น ๆ
+     eb.subscribers[eventName] = append(eb.subscribers[eventName], handler)
+    }
+    
+    // Publish ส่ง event ไปยัง handler ทุกตัวที่ subscribe event ชื่อเดียวกัน
+    func (eb *inmemoryEventBus) Publish(ctx context.Context, event Event) error {
+     eb.mu.RLock()
+     defer eb.mu.RUnlock()
+    
+     // หา handler ที่ลงทะเบียนกับ event นี้
+     handlers, ok := eb.subscribers[event.EventName()]
+     if !ok {
+      // ไม่มี handler สำหรับ event นี้ ก็ return nil
+      return nil
+     }
+    
+     // สร้าง context ใหม่ที่อาจมีข้อมูลเพิ่มเติมสำหรับ event bus
+     busCtx := context.WithValue(ctx, "name", "context in event bus")
+    
+     // เรียก handler ทุกตัวแบบ asynchronous (goroutine) เพื่อไม่บล็อกการทำงาน
+     for _, handler := range handlers {
+      go func(h IntegrationEventHandler) {
+       // เรียก handle event และ log error ถ้ามี
+       err := h.Handle(busCtx, event)
+       if err != nil {
+        log.Printf("error handling event %s: %v", event.EventName(), err)
+       }
+      }(handler)
+     }
+     return nil
+    }
+    ```
+
+### สร้าง Integration Event
+
+เนื่องจาก integration event จะต้องใช้ร่วมกันหลายโมดูล ให้สร้างโปรเจกต์ใหม่ชื่อ messaging ใน shared
+
+- สร้างโปรเจกต์ `messaging`
+
+    ```bash
+    mkdir -p src/shared/messaging
+    cd src/shared/messaging
+    go mod init go-mma/shared/messaging
+    ```
+
+    เพิ่มลง workspace ด้วย
+
+    ```go
+    {
+      "folders": [
+        // ...,
+        {
+          "path": "src/shared/messaging"
+        }
+      ],
+      "settings": {}
+    }
+    ```
+
+    เพิ่ม module replace สำหรับโปรเจกต์ `common`
+
+    ```go
+    module go-mma/shared/messaging
+    
+    go 1.24.1
+    
+    replace go-mma/shared/common v0.0.0 => ../common
+    
+    require go-mma/shared/common v0.0.0
+    ```
+
+- เพิ่ม module replace ในทุกโมดูลโปรเจกต์ และ `app`
+
+    ```go
+    // app
+    replace go-mma/shared/messaging v0.0.0 => ../shared/messaging
+    
+    // customer
+    replace go-mma/shared/messaging v0.0.0 => ../../shared/messaging
+    
+    // order
+    replace go-mma/shared/messaging v0.0.0 => ../../shared/messaging
+    
+    // notification
+    replace go-mma/shared/messaging v0.0.0 => ../../shared/messaging
+    ```
+
+- สร้างไฟล์ `messaging/customer_created.go`
+
+    ```go
+    package messaging
+    
+    import (
+     "go-mma/shared/common/eventbus"
+     "go-mma/shared/common/idgen"
+     "time"
+    )
+    
+    const (
+     CustomerCreatedIntegrationEventName eventbus.EventName = "CustomerCreated"
+    )
+    
+    type CustomerCreatedIntegrationEvent struct {
+     eventbus.BaseEvent
+     CustomerID int64  `json:"customer_id"`
+     Email      string `json:"email"`
+    }
+    
+    func NewCustomerCreatedIntegrationEvent(customerID int64, email string) *CustomerCreatedIntegrationEvent {
+     return &CustomerCreatedIntegrationEvent{
+      BaseEvent: eventbus.BaseEvent{
+       ID:   idgen.GenerateUUIDLikeID(),
+       Name: CustomerCreatedIntegrationEventName,
+       At:   time.Now(),
+      },
+      CustomerID: customerID,
+      Email:      email,
+     }
+    }
+    ```
+
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### สร้าง Integration Event Handler
+
+สำหรับโค้ดที่รับ event “`CustomerCreated`” มาทำงานต่อ โดยใยที่นี่จะทำที่โมดูล notification เพื่อส่ง welcome email
+
+- สร้างไฟล์ `notification/internal/integration/customer/welcome_email_handler.go` (สื่อว่า integration จากโมดูล customer)
+
+    ```go
+    package customer
+    
+    import (
+     "context"
+     "fmt"
+     "go-mma/modules/notification/service"
+     "go-mma/shared/common/eventbus"
+     "go-mma/shared/messaging"
+    )
+    
+    type welcomeEmailHandler struct {
+     notiService service.NotificationService
+    }
+    
+    func NewWelcomeEmailHandler(notiService service.NotificationService) *welcomeEmailHandler {
+     return &welcomeEmailHandler{
+      notiService: notiService,
+     }
+    }
+    
+    func (h *welcomeEmailHandler) Handle(ctx context.Context, evt eventbus.Event) error {
+     e, ok := evt.(*messaging.CustomerCreatedIntegrationEvent) // ใช้ pointer
+     if !ok {
+      return fmt.Errorf("invalid event type")
+     }
+    
+     return h.notiService.SendEmail(e.Email, "Welcome to our service!", map[string]any{
+      "message": "Thank you for joining us! We are excited to have you as a member.",
+     })
+    }
+    ```
+
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+
+### สร้าง Integration Event Publisher
+
+เดิมใน CustomerCreatedDomainEventHandler จะมีการเรียก notiService เพื่อส่งอีเมลโดยตรง เราจะเปลี่ยนส่งนี้ให้ส่งไปเป็น integration event แทน
+
+- แก้ไขไฟล์  `customer/internal/domain/eventhandler/customer_created_handler.go`
+
+    ```go
+    package eventhandler
+    
+    import (
+     "context"
+     "go-mma/modules/customer/internal/domain/event"
+     "go-mma/shared/common/domain"
+     "go-mma/shared/common/eventbus"
+     "go-mma/shared/messaging"
+    )
+    
+    type customerCreatedDomainEventHandler struct {
+     eventBus eventbus.EventBus // เปลี่ยนมาใช้ eventbus
+    }
+    
+    // เปลี่ยนมาใช้ eventbus
+    func NewCustomerCreatedDomainEventHandler(eventBus eventbus.EventBus) domain.DomainEventHandler {
+     return &customerCreatedDomainEventHandler{
+      eventBus: eventBus, // เปลี่ยนมาใช้ eventbus
+     }
+    }
+    
+    func (h *customerCreatedDomainEventHandler) Handle(ctx context.Context, evt domain.DomainEvent) error {
+     e, ok := evt.(*event.CustomerCreatedDomainEvent) // ใช้ pointer
+    
+     if !ok {
+      return domain.ErrInvalidEvent
+     }
+    
+     // สร้าง IntegrationEvent จาก Domain Event
+     integrationEvent := messaging.NewCustomerCreatedIntegrationEvent(
+      e.CustomerID,
+      e.Email,
+     )
+    
+     return h.eventBus.Publish(ctx, integrationEvent)
+    }
+    ```
+
+- ติดตั้ง dependencies ด้วย `go mod tidy`
+- แก้ไขไฟล์  `common/module/module.go` เพื่อให้ `Init()` รองรับ event bus
+
+    ```go
+    type Module interface {
+     APIVersion() string
+     Init(reg registry.ServiceRegistry, eventBus eventbus.EventBus) error // รับ eventBus เพิ่ม
+     RegisterRoutes(r fiber.Router)
+    }
+    ```
+
+- แก้ไขไฟล์  `customer/module.go` เพื่อลบ notification service ออก
+
+    ```go
+    func (m *moduleImp) Init(reg registry.ServiceRegistry, eventBus eventbus.EventBus) error {
+     // เอา notiSvc ออก
+     
+     // Register domain event handler
+     dispatcher := domain.NewSimpleDomainEventDispatcher()
+     dispatcher.Register(event.CustomerCreatedDomainEventType, eventhandler.NewCustomerCreatedDomainEventHandler(eventBus)) // ส่ง eventBus เข้าไปแทน
+    
+     repo := repository.NewCustomerRepository(m.mCtx.DBCtx)
+    
+     mediator.Register(create.NewCreateCustomerCommandHandler(m.mCtx.Transactor, repo, dispatcher))
+     mediator.Register(getbyid.NewGetCustomerByIDQueryHandler(repo))
+     mediator.Register(reservecredit.NewReserveCreditCommandHandler(m.mCtx.Transactor, repo))
+     mediator.Register(releasecredit.NewReleaseCreditCommandHandler(m.mCtx.Transactor, repo))
+    
+     return nil
+    }
+    ```
+
+- ต้องแก้ไข `Init()` ที่โมดูล `order` กับ `notification` ด้วย
+- แก้ไฟล์ `app/application/application.go` เพื่อให้ส่ง event bus เข้าไปตอน init module
+
+    ```go
+    package application
+    
+    import (
+      // ...
+     "go-mma/shared/common/eventbus"
+      // ...
+    )
+    
+    type Application struct {
+     config          config.Config
+     httpServer      HTTPServer
+     serviceRegistry registry.ServiceRegistry
+     eventBus        eventbus.EventBus // เพ่ิม
+    }
+    
+    func New(config config.Config) *Application {
+     return &Application{
+      config:          config,
+      httpServer:      newHTTPServer(config),
+      serviceRegistry: registry.NewServiceRegistry(),
+      eventBus:        eventbus.NewInMemoryEventBus(), // เพ่ิม
+     }
+    }
+    
+    // ...
+    
+    func (app *Application) initModule(m module.Module) error {
+     return m.Init(app.serviceRegistry, app.eventBus) // เพ่ิมส่ง eventBus
+    }
+    
+    // ...
+    ```
+
+  - ติดตั้ง dependencies ด้วย `go mod tidy` ที่โปรเจกต์ `app`
+
+### สร้าง Register / Subscribe
+
+ให้โมดูล notification คอยรับ integration event
+
+- แก้ไขไฟล์ `notification/module.go`
+
+    ```go
+    func (m *moduleImp) Init(reg registry.ServiceRegistry, eventBus eventbus.EventBus) error {
+     m.notiSvc = service.NewNotificationService()
+    
+     // subscribe to integration events
+     eventBus.Subscribe(messaging.CustomerCreatedIntegrationEventName, customer.NewWelcomeEmailHandler(m.notiSvc))
+    
+     return nil
+    }
+    ```
+
+เพียงเท่านี้ก็สามารถใช้ integration event แบบ in-memory event bus ได้แล้ว แต่อย่าลืมว่าวิธีมีข้อเสียคือ ถ้า handler พังหรือ panic จะไม่มี retry อาจทำให้เกิด inconsistency เช่น ลูกค้าถูกสร้างแล้ว (`INSERT INTO customers`) แต่ไม่ส่งอีเมลต้อนรับ วิธีแก้ ได้แก่
+
+- อาจเพิ่ม retry logic ตอนส่งอีเมล
+- ใช้แนวทาง Hybrid Approach คือ ใช้ Domain Event → แปลง (map) เป็น Integration Event → เขียน Outbox table (ต้องทำใน transaction เดียวกับ business data)→ ใช้ CDC tools ส่ง event
+
+---
+
+## สรุป
+
+**Modular Monolith** เป็นสถาปัตยกรรมที่ลงตัวอย่างยิ่งสำหรับหลายๆ โปรเจกต์ในปัจจุบัน โดยเฉพาะอย่างยิ่งเมื่อคุณต้องการความรวดเร็วในการพัฒนาในช่วงเริ่มต้น แต่ก็ยังคงความยืดหยุ่นในการปรับขนาดและปรับเปลี่ยนไปสู่ **Microservices** ในอนาคต
+
+แนวทางนี้ช่วยให้คุณได้ประโยชน์จากการรวมโค้ดเบสไว้ในที่เดียว ทำให้การพัฒนา, ทดสอบ, และ Deployment ทำได้ง่ายขึ้น ลดความซับซ้อนในการจัดการโครงสร้างพื้นฐานที่ Microservices มักจะต้องเจอ ในขณะเดียวกันก็ยังคงรักษาหลักการของความเป็น **โมดูลาร์** ผ่านการกำหนดขอบเขตที่ชัดเจนและการบังคับใช้ **การแยกข้อมูล** ระหว่างโมดูลต่างๆ
+
+ด้วยกฎเกณฑ์ที่ชัดเจนในการจัดการข้อมูล เช่น การที่แต่ละโมดูลเข้าถึงได้เฉพาะข้อมูลของตนเอง และไม่มีการแชร์ตารางโดยตรง Modular Monolith จึงส่งเสริมการออกแบบที่ **หลวมและยืดหยุ่น** ทำให้ง่ายต่อการบำรุงรักษาและเพิ่มฟีเจอร์ใหม่ๆ โดยไม่ก่อให้เกิดผลกระทบที่คาดไม่ถึง
+
+ดังนั้น หากคุณกำลังมองหาสถาปัตยกรรมที่ช่วยให้คุณ **เริ่มต้นได้อย่างรวดเร็ว จัดการง่าย และพร้อมเติบโตในอนาคต** Modular Monolith คือทางเลือกที่คุณควรพิจารณาเป็นอันดับต้นๆ เลยครับ
