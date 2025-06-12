@@ -1,6 +1,7 @@
 package module
 
 import (
+	"go-mma/shared/common/eventbus"
 	"go-mma/shared/common/registry"
 	"go-mma/shared/common/storage/sqldb/transactor"
 
@@ -9,7 +10,7 @@ import (
 
 type Module interface {
 	APIVersion() string
-	Init(reg registry.ServiceRegistry) error
+	Init(reg registry.ServiceRegistry, eventBus eventbus.EventBus) error // รับ eventBus เพิ่ม
 	RegisterRoutes(r fiber.Router)
 }
 

@@ -3,19 +3,20 @@ package eventhandler
 import (
 	"context"
 	"go-mma/modules/customer/internal/domain/event"
-	notiService "go-mma/modules/notification/service"
 	"go-mma/shared/common/domain"
+	"go-mma/shared/common/eventbus"
+	"go-mma/shared/messaging"
 )
 
 // customerCreatedDomainEventHandler คือ handler สำหรับจัดการ event ประเภท CustomerCreatedDomainEvent
 type customerCreatedDomainEventHandler struct {
-	notiSvc notiService.NotificationService // service สำหรับส่งการแจ้งเตือน (เช่น อีเมล)
+	eventBus eventbus.EventBus // เปลี่ยนมาใช้ eventbus
 }
 
 // NewCustomerCreatedDomainEventHandler คือฟังก์ชันสร้าง instance ของ handler นี้
-func NewCustomerCreatedDomainEventHandler(notiSvc notiService.NotificationService) domain.DomainEventHandler {
+func NewCustomerCreatedDomainEventHandler(eventBus eventbus.EventBus) domain.DomainEventHandler {
 	return &customerCreatedDomainEventHandler{
-		notiSvc: notiSvc,
+		eventBus: eventBus, // เปลี่ยนมาใช้ eventbus
 	}
 }
 
@@ -28,14 +29,11 @@ func (h *customerCreatedDomainEventHandler) Handle(ctx context.Context, evt doma
 		return domain.ErrInvalidEvent
 	}
 
-	// เรียกใช้ service ส่งอีเมลต้อนรับลูกค้าใหม่
-	if err := h.notiSvc.SendEmail(e.Email, "Welcome to our service!", map[string]any{
-		"message": "Thank you for joining us! We are excited to have you as a member.",
-	}); err != nil {
-		// หากส่งอีเมลไม่สำเร็จ ส่ง error กลับไป
-		return err
-	}
+	// สร้าง IntegrationEvent จาก Domain Event
+	integrationEvent := messaging.NewCustomerCreatedIntegrationEvent(
+		e.CustomerID,
+		e.Email,
+	)
 
-	// ถ้าสำเร็จทั้งหมด ให้คืน nil (ไม่มี error)
-	return nil
+	return h.eventBus.Publish(ctx, integrationEvent)
 }

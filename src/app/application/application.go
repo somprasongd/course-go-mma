@@ -3,6 +3,7 @@ package application
 import (
 	"fmt"
 	"go-mma/config"
+	"go-mma/shared/common/eventbus"
 	"go-mma/shared/common/logger"
 	"go-mma/shared/common/module"
 	"go-mma/shared/common/registry"
@@ -12,6 +13,7 @@ type Application struct {
 	config          config.Config
 	httpServer      HTTPServer
 	serviceRegistry registry.ServiceRegistry
+	eventBus        eventbus.EventBus
 }
 
 func New(config config.Config) *Application {
@@ -19,6 +21,7 @@ func New(config config.Config) *Application {
 		config:          config,
 		httpServer:      newHTTPServer(config),
 		serviceRegistry: registry.NewServiceRegistry(),
+		eventBus:        eventbus.NewInMemoryEventBus(),
 	}
 }
 
@@ -61,7 +64,7 @@ func (app *Application) RegisterModules(modules ...module.Module) error {
 
 // แยกเป็นฟังก์ชันตาม single-responsibility principle (SRP)
 func (app *Application) initModule(m module.Module) error {
-	return m.Init(app.serviceRegistry)
+	return m.Init(app.serviceRegistry, app.eventBus)
 }
 
 func (app *Application) registerModuleRoutes(m module.Module) {

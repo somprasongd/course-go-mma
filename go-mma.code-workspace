@@ -20,6 +20,9 @@
     },
     {
       "path": "src/shared/common"
+    },
+    {
+      "path": "src/shared/messaging"
     }
   ],
   "settings": {}

@@ -4,6 +4,7 @@ import (
 	"go-mma/modules/order/internal/feature/cancel"
 	"go-mma/modules/order/internal/feature/create"
 	"go-mma/modules/order/internal/repository"
+	"go-mma/shared/common/eventbus"
 	"go-mma/shared/common/mediator"
 	"go-mma/shared/common/module"
 	"go-mma/shared/common/registry"
@@ -26,7 +27,7 @@ func (m *moduleImp) APIVersion() string {
 	return "v1"
 }
 
-func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
+func (m *moduleImp) Init(reg registry.ServiceRegistry, eventBus eventbus.EventBus) error {
 
 	// Resolve NotificationService from the registry
 	notiSvc, err := registry.ResolveAs[notiService.NotificationService](reg, notiModule.NotificationServiceKey)

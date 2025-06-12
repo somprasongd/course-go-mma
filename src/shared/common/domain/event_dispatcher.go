@@ -63,7 +63,7 @@ func (d *simpleDomainEventDispatcher) Dispatch(ctx context.Context, events []Dom
 				// หาก handler ทำงานผิดพลาด จะคืน error พร้อมระบุ event ที่ผิด
 				err := h.Handle(ctx, event)
 				if err != nil {
-					return fmt.Errorf("error handling event %s: %w", event.EventName(), err)
+					return fmt.Errorf("error handling domain event %s: %w", event.EventName(), err)
 				}
 				return nil
 			}(handler)

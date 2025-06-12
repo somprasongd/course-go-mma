@@ -10,6 +10,8 @@ replace go-mma/modules/customer v0.0.0 => ../../modules/customer
 
 replace go-mma/shared/contract/customercontract v0.0.0 => ../../shared/contract/customercontract
 
+replace go-mma/shared/messaging v0.0.0 => ../../shared/messaging
+
 require (
 	github.com/gofiber/fiber/v3 v3.0.0-beta.4
 	go-mma/modules/notification v0.0.0
@@ -35,6 +37,7 @@ require (
 	github.com/valyala/fasthttp v1.58.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	go-mma/shared/messaging v0.0.0 // indirect
 	go.elastic.co/ecszap v1.0.3 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
