@@ -1,4 +1,4 @@
-package dto
+package create
 
 import "fmt"
 
@@ -19,8 +19,4 @@ func (r *CreateOrderRequest) Validate() error {
 
 type CreateOrderResponse struct {
 	ID int64 `json:"id"`
-}
-
-func NewCreateOrderResponse(id int64) *CreateOrderResponse {
-	return &CreateOrderResponse{ID: id}
 }

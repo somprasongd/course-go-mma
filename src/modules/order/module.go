@@ -1,12 +1,12 @@
 package order
 
 import (
-	"go-mma/modules/order/handler"
+	"go-mma/modules/order/internal/feature/cancel"
+	"go-mma/modules/order/internal/feature/create"
 	"go-mma/modules/order/internal/repository"
-	"go-mma/modules/order/service"
+	"go-mma/shared/common/mediator"
 	"go-mma/shared/common/module"
 	"go-mma/shared/common/registry"
-	"go-mma/shared/contract/customercontract"
 
 	notiModule "go-mma/modules/notification"
 	notiService "go-mma/modules/notification/service"
@@ -19,8 +19,7 @@ func NewModule(mCtx *module.ModuleContext) module.Module {
 }
 
 type moduleImp struct {
-	mCtx     *module.ModuleContext
-	orderSvc service.OrderService
+	mCtx *module.ModuleContext
 }
 
 func (m *moduleImp) APIVersion() string {
@@ -28,11 +27,6 @@ func (m *moduleImp) APIVersion() string {
 }
 
 func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
-	// Resolve CustomerService as CreditManagerKey from the registry
-	custSvc, err := registry.ResolveAs[customercontract.CreditManager](reg, customercontract.CreditManagerKey)
-	if err != nil {
-		return err
-	}
 
 	// Resolve NotificationService from the registry
 	notiSvc, err := registry.ResolveAs[notiService.NotificationService](reg, notiModule.NotificationServiceKey)
@@ -41,16 +35,15 @@ func (m *moduleImp) Init(reg registry.ServiceRegistry) error {
 	}
 
 	repo := repository.NewOrderRepository(m.mCtx.DBCtx)
-	m.orderSvc = service.NewOrderService(m.mCtx.Transactor, custSvc, repo, notiSvc)
+
+	mediator.Register(create.NewCreateOrderCommandHandler(m.mCtx.Transactor, repo, notiSvc))
+	mediator.Register(cancel.NewCancelOrderCommandHandler(m.mCtx.Transactor, repo))
 
 	return nil
 }
 
 func (m *moduleImp) RegisterRoutes(router fiber.Router) {
-	// wiring dependencies
-	hdl := handler.NewOrderHandler(m.orderSvc)
-
 	orders := router.Group("/orders")
-	orders.Post("", hdl.CreateOrder)
-	orders.Delete("/:orderID", hdl.CancelOrder)
+	create.NewEndpoint(orders, "")
+	cancel.NewEndpoint(orders, "/:orderID")
 }
