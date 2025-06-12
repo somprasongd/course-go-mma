@@ -11,10 +11,11 @@ ENV GOARCH=amd64
 ARG VERSION=latest
 ENV IMAGE_VERSION=${VERSION}
 RUN echo "Build version: $IMAGE_VERSION"
-RUN go build -ldflags \
+RUN cd src/app && \
+	go build -ldflags \
 	"-X 'go-mma/build.Version=${IMAGE_VERSION}' \
 	-X 'go-mma/build.Time=$(date +"%Y-%m-%dT%H:%M:%S%z")'" \
-	-o app cmd/api/main.go
+	-o ../../app cmd/api/main.go
 
 FROM alpine:latest
 WORKDIR /root/
