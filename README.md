@@ -1124,10 +1124,13 @@ Monolith.order --> Database: ตรวจสอบ orderID
     .PHONY: build
     build:
      go build -ldflags \
-     "-X 'go-mma/build.Version=${BUILD_VERSION}' \
+     "-s -w \
+     -X 'go-mma/build.Version=${BUILD_VERSION}' \
      -X 'go-mma/build.Time=${BUILD_TIME}'" \
      -o app cmd/api/main.go
     ```
+
+    > `-ldflags="-s -w"` คือ flag ที่ใช้กับ `go build` เพื่อ **strip debugging information** ออกจาก binary ทำให้ไฟล์เล็กลง
 
 - รันคำสั่ง build พร้อมกำหนด build version
 
@@ -1140,33 +1143,43 @@ Monolith.order --> Database: ตรวจสอบ orderID
 - สร้าง `Dockerfile`
 
     ```docker
-    FROM golang:1.24-alpine AS base
+    # Builder stage
+    FROM golang:1.24-alpine AS builder
     WORKDIR /app
     COPY go.mod go.sum ./
     RUN go mod download
     COPY . .
-    
-    FROM base AS builder
-    ENV GOARCH=amd64
-    
+
+    # ปิด cgo (CGO_ENABLED=0)
+    ENV CGO_ENABLED=0 \
+        GOOS=linux \
+        GOARCH=amd64
+
     # ตั้งค่า default สำหรับ VERSION
     ARG VERSION=latest
     ENV IMAGE_VERSION=${VERSION}
     RUN echo "Build version: $IMAGE_VERSION"
     RUN go build -ldflags \
-     "-X 'go-mma/build.Version=${IMAGE_VERSION}' \
-     -X 'go-mma/build.Time=$(date +"%Y-%m-%dT%H:%M:%S%z")'" \
-     -o app cmd/api/main.go
-    
-    FROM alpine:latest
-    WORKDIR /root/
+    # strip debugging information ออกจาก binary ทำให้ไฟล์เล็กลง
+        "-s -w \
+        -X 'go-mma/build.Version=${IMAGE_VERSION}' \
+        -X 'go-mma/build.Time=$(date +"%Y-%m-%dT%H:%M:%S%z")'" \
+        -o /app/app cmd/api/main.go
+
+    # Final stage
+    FROM alpine:3.22
+    RUN apk add --no-cache ca-certificates tzdata && \
+            # สร้าง non-root user
+        addgroup -S appgroup && adduser -S appuser -G appgroup 
+        
+    WORKDIR /app
+    COPY --from=builder /app/app .
+    USER appuser
     EXPOSE 8090
     ENV TZ=Asia/Bangkok
-    RUN apk --no-cache add ca-certificates tzdata
-    
-    COPY --from=builder /app/app .
-    
-    CMD ["./app"]
+
+    # ใช้ ENTRYPOINT เพื่อล็อกว่าต้องรันไฟล์ไหน
+    ENTRYPOINT ["./app"]
     ```
 
 - สร้าง `.dockerignore` เพื่อ exclude ไฟล์ที่ไม่จำเป็นในการ build
@@ -6217,66 +6230,77 @@ could not import go-mma/modules/customer/internal/repository (invalid use of int
 - แก้ไฟล์ `Makefile` เพื่อแก้ path ในการ build
 
     > แก้ไขไฟล์ `main.go`
-    >
 
     ```bash
     .PHONY: build
     build:
-     cd src/app && \
-     go build -ldflags \
-     "-X 'go-mma/build.Version=${BUILD_VERSION}' \
-     -X 'go-mma/build.Time=${BUILD_TIME}'" \
-     -o ../../app cmd/api/main.go
+        cd src/app && \
+        go build -ldflags \
+        "-s -w \
+        -X 'go-mma/build.Version=${BUILD_VERSION}' \
+        -X 'go-mma/build.Time=${BUILD_TIME}'" \
+        -o ../../app cmd/api/main.go
     ```
 
 - ทดลองรัน build
 
     ```bash
-    make build
+    BUILD_VERSION=0.0.2 make build
     ```
 
 ### Build โปรแกรมเป็น Docker image
 
 - แก้ไฟล์ `Dockerfile` เพื่อแก้ path ในการ build
 
-    > แก้ไขไฟล์ `Dockerfile.go`
-    >
+    > แก้ไขไฟล์ `Dockerfile`
 
     ```docker
-    FROM golang:1.24-alpine AS base
+    # Builder stage
+    FROM golang:1.24-alpine AS builder
     WORKDIR /app
-    COPY go.mod go.sum ./
-    RUN go mod download
     COPY . .
-    
-    FROM base AS builder
-    ENV GOARCH=amd64
-    
+    RUN cd src/app && go mod download
+
+    # ปิด cgo (CGO_ENABLED=0)
+
+    ENV CGO_ENABLED=0 \
+        GOOS=linux \
+        GOARCH=amd64
+
     # ตั้งค่า default สำหรับ VERSION
+
     ARG VERSION=latest
     ENV IMAGE_VERSION=${VERSION}
     RUN echo "Build version: $IMAGE_VERSION"
     RUN cd src/app && \
-     go build -ldflags \
-     "-X 'go-mma/build.Version=${IMAGE_VERSION}' \
-     -X 'go-mma/build.Time=$(date +"%Y-%m-%dT%H:%M:%S%z")'" \
-     -o ../../app cmd/api/main.go
+    go build -ldflags \
+    # strip debugging information ออกจาก binary ทำให้ไฟล์เล็กลง
+    "-s -w \
+    -X 'go-mma/build.Version=${IMAGE_VERSION}' \
+    -X 'go-mma/build.Time=$(date +"%Y-%m-%dT%H:%M:%S%z")'" \
+    -o /app/app cmd/api/main.go
+
+    # Final stage
+
+    FROM alpine:3.22
+    RUN apk add --no-cache ca-certificates tzdata && \
+    # สร้าง non-root user
+        addgroup -S appgroup && adduser -S appuser -G appgroup
     
-    FROM alpine:latest
-    WORKDIR /root/
+    WORKDIR /app
+    COPY --from=builder /app/app .
+    USER appuser
     EXPOSE 8090
     ENV TZ=Asia/Bangkok
-    RUN apk --no-cache add ca-certificates tzdata
-    
-    COPY --from=builder /app/app .
-    
-    CMD ["./app"]
+
+    # ใช้ ENTRYPOINT เพื่อล็อกว่าต้องรันไฟล์ไหน
+    ENTRYPOINT ["./app"]
     ```
 
 - ทดลองรัน build
 
     ```bash
-    make image
+    BUILD_VERSION=0.0.2 make image
     ```
 
 ## กำหนด Public API Contract ระหว่างโมดูล
