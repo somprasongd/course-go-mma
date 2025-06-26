@@ -15,7 +15,8 @@ BUILD_TIME := $(shell date +"%Y-%m-%dT%H:%M:%S%z")
 build:
 	cd src/app && \
 	go build -ldflags \
-	"-X 'go-mma/build.Version=${BUILD_VERSION}' \
+	"-s -w \
+	-X 'go-mma/build.Version=${BUILD_VERSION}' \
 	-X 'go-mma/build.Time=${BUILD_TIME}'" \
 	-o ../../app cmd/api/main.go
 
