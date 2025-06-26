@@ -17,6 +17,8 @@ type Config struct {
 	HTTPPort        int
 	GracefulTimeout time.Duration
 	DSN             string
+	GatewayHost     string
+	GatewayBasePath string
 }
 
 func Load() (*Config, error) {
@@ -24,6 +26,8 @@ func Load() (*Config, error) {
 		HTTPPort:        env.GetIntDefault("HTTP_PORT", 8090),
 		GracefulTimeout: env.GetDurationDefault("GRACEFUL_TIMEOUT", 5*time.Second),
 		DSN:             env.Get("DB_DSN"),
+		GatewayHost:     env.Get("GATEWAY_HOST"),
+		GatewayBasePath: env.GetDefault("GATEWAY_BASEURL", "/api/v1"),
 	}
 	err := config.Validate()
 	if err != nil {

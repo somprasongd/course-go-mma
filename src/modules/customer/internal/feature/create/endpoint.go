@@ -13,6 +13,16 @@ func NewEndpoint(router fiber.Router, path string) {
 	router.Post(path, createCustomerHTTPHandler)
 }
 
+// CreateCustomer godoc
+// @Summary		Create Customer
+// @Description	Create Customer
+// @Tags			Customer
+// @Produce		json
+// @Param			customer	body	CreateCustomerRequest	true	"Create Data"
+// @Failure		401
+// @Failure		500
+// @Success		201	{object}	CreateCustomerResponse
+// @Router			/customers [post]
 func createCustomerHTTPHandler(c fiber.Ctx) error {
 	// แปลง request body -> dto
 	var req CreateCustomerRequest

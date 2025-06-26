@@ -1,0 +1,100 @@
+definitions:
+  create.CreateCustomerRequest:
+    properties:
+      credit:
+        type: integer
+      email:
+        type: string
+    type: object
+  create.CreateCustomerResponse:
+    properties:
+      id:
+        type: integer
+    type: object
+  create.CreateOrderRequest:
+    properties:
+      customer_id:
+        type: integer
+      order_total:
+        type: integer
+    type: object
+  create.CreateOrderResponse:
+    properties:
+      id:
+        type: integer
+    type: object
+info:
+  contact: {}
+paths:
+  /customers:
+    post:
+      description: Create Customer
+      parameters:
+      - description: Create Data
+        in: body
+        name: customer
+        required: true
+        schema:
+          $ref: '#/definitions/create.CreateCustomerRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/create.CreateCustomerResponse'
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      summary: Create Customer
+      tags:
+      - Customer
+  /orders:
+    post:
+      description: Create Order
+      parameters:
+      - description: Create Data
+        in: body
+        name: order
+        required: true
+        schema:
+          $ref: '#/definitions/create.CreateOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/create.CreateOrderResponse'
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      summary: Create Order
+      tags:
+      - Order
+  /orders/{orderID}:
+    delete:
+      description: Cancel Order By Order ID
+      parameters:
+      - description: order id
+        in: path
+        name: orderID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not Found
+        "500":
+          description: Internal Server Error
+      summary: Cancel Order
+      tags:
+      - Order
+swagger: "2.0"
