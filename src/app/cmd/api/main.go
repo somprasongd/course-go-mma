@@ -17,11 +17,10 @@ import (
 	"go-mma/shared/common/storage/sqldb/transactor"
 )
 
-var (
-	Version = "local-dev"
-	Time    = "n/a"
-)
-
+// //  @securityDefinitions.apikey	ApiKeyAuth
+// //  @in							header
+// //  @name						Authorization
+// //  @description				Enter the token with the `Bearer: ` prefix, e.g. "Bearer YOUR_JWT_TOKEN"
 func main() {
 	closeLog, err := logger.Init()
 	if err != nil {

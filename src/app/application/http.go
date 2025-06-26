@@ -29,11 +29,11 @@ type httpServer struct {
 func newHTTPServer(config config.Config) HTTPServer {
 	return &httpServer{
 		config: config,
-		app:    newFiber(),
+		app:    newFiber(config),
 	}
 }
 
-func newFiber() *fiber.App {
+func newFiber(config config.Config) *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName: fmt.Sprintf("Go MMA version %s", build.Version),
 	})
@@ -44,6 +44,8 @@ func newFiber() *fiber.App {
 	app.Use(recover.New())              // auto-recovers from panic (internal only)
 	app.Use(middleware.RequestLogger()) // logs HTTP request
 	app.Use(middleware.ResponseError())
+
+	app.Get("/docs/*", middleware.APIDoc(config))
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(map[string]string{"version": build.Version, "time": build.Time})

@@ -11,6 +11,16 @@ func NewEndpoint(router fiber.Router, path string) {
 	router.Post(path, createOrderHTTPHandler)
 }
 
+// CreateOrder godoc
+// @Summary		Create Order
+// @Description	Create Order
+// @Tags			Order
+// @Produce		json
+// @Param			order	body	CreateOrderRequest	true	"Create Data"
+// @Failure		401
+// @Failure		500
+// @Success		201	{object}	CreateOrderResponse
+// @Router			/orders [post]
 func createOrderHTTPHandler(c fiber.Ctx) error {
 	// แปลง request body -> struct
 	var req CreateOrderRequest

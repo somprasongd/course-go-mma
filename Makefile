@@ -47,3 +47,10 @@ mgu:
 .PHONY: mgd
 mgd:
 	docker run --rm --network host -v $(ROOT_DIR)migrations:/migrations migrate/migrate -verbose -path=/migrations/ -database $(DB_DSN) down 1
+
+.PHONY: doc
+# Install swag by using: go install github.com/swaggo/swag/v2/cmd/swag@latest
+doc:
+	swag fmt -d src && \
+	cd src/app && \
+	swag init --parseDependency  --parseDependencyLevel 3 -g cmd/api/main.go -o docs
