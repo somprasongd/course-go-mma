@@ -15,6 +15,7 @@ type CustomerRepository interface {
 	Create(ctx context.Context, customer *model.Customer) error
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	FindByID(ctx context.Context, id int64) (*model.Customer, error)
+	FindByIDForUpdate(ctx context.Context, id int64) (*model.Customer, error)
 	UpdateCredit(ctx context.Context, customer *model.Customer) error
 }
 
@@ -73,6 +74,28 @@ func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Cus
 	SELECT *
 	FROM customer.customers
 	WHERE id = $1
+`
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	var customer model.Customer
+	err := r.dbCtx(ctx).QueryRowxContext(ctx, query, id).StructScan(&customer)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, errs.HandleDBError(fmt.Errorf("an error occurred while finding a customer by id: %w", err))
+	}
+
+	return &customer, nil
+}
+
+func (r *customerRepository) FindByIDForUpdate(ctx context.Context, id int64) (*model.Customer, error) {
+	query := `
+	SELECT *
+	FROM customer.customers
+	WHERE id = $1
+	FOR NO KEY UPDATE
 `
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()

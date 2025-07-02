@@ -26,7 +26,7 @@ func NewReleaseCreditCommandHandler(
 
 func (h *releaseCreditCommandHandler) Handle(ctx context.Context, cmd *customercontract.ReleaseCreditCommand) (*mediator.NoResponse, error) {
 	err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
-		customer, err := h.custRepo.FindByID(ctx, cmd.CustomerID)
+		customer, err := h.custRepo.FindByIDForUpdate(ctx, cmd.CustomerID)
 		if err != nil {
 			logger.Log.Error(err.Error())
 			return err

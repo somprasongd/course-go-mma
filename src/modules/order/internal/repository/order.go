@@ -14,6 +14,7 @@ import (
 type OrderRepository interface {
 	Create(ctx context.Context, order *model.Order) error
 	FindByID(ctx context.Context, id int64) (*model.Order, error)
+	FindByIDForUpdate(ctx context.Context, id int64) (*model.Order, error)
 	Cancel(ctx context.Context, id int64) error
 }
 
@@ -53,6 +54,28 @@ func (r *orderRepository) FindByID(ctx context.Context, id int64) (*model.Order,
 	FROM sales.orders
 	WHERE id = $1
 	AND canceled_at IS NULL -- รายออเดอร์ต้องยังไม่ถูกยกเลิก
+`
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var order model.Order
+	err := r.dbCtx(ctx).QueryRowxContext(ctx, query, id).StructScan(&order)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, errs.HandleDBError(fmt.Errorf("an error occurred while finding a order by id: %w", err))
+	}
+	return &order, nil
+}
+
+func (r *orderRepository) FindByIDForUpdate(ctx context.Context, id int64) (*model.Order, error) {
+	query := `
+	SELECT *
+	FROM sales.orders
+	WHERE id = $1
+	AND canceled_at IS NULL -- รายออเดอร์ต้องยังไม่ถูกยกเลิก
+	FOR NO KEY UPDATE
 `
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

@@ -27,7 +27,7 @@ func NewCancelOrderCommandHandler(
 func (h *cancelOrderCommandHandler) Handle(ctx context.Context, cmd *CancelOrderCommand) (*mediator.NoResponse, error) {
 	err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
 		// Business Logic Rule: ตรวจสอบ order id
-		order, err := h.orderRepo.FindByID(ctx, cmd.ID)
+		order, err := h.orderRepo.FindByIDForUpdate(ctx, cmd.ID)
 		if err != nil {
 			logger.Log.Error(err.Error())
 			return err
