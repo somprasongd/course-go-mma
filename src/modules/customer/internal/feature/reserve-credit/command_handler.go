@@ -27,7 +27,7 @@ func NewReserveCreditCommandHandler(
 
 func (h *reserveCreditCommandHandler) Handle(ctx context.Context, cmd *customercontract.ReserveCreditCommand) (*mediator.NoResponse, error) {
 	err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
-		customer, err := h.custRepo.FindByID(ctx, cmd.CustomerID)
+		customer, err := h.custRepo.FindByIDForUpdate(ctx, cmd.CustomerID)
 		if err != nil {
 			logger.Log.Error(err.Error())
 			return err
