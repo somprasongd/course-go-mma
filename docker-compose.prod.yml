@@ -1,0 +1,68 @@
+networks:
+  # network สำหรับ reverse proxy
+  frontend:
+  # network สำหรับ services ภายใน
+  backend:
+
+services:
+  db:
+    environment:
+      POSTGRES_DB: go-mma-db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    networks:
+      - backend
+    # ตรวจสอบว่าพร้อมทำงานรึยัง
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    volumes:
+      - ./migrations:/migrations
+    networks:
+      - backend
+    depends_on:
+      # ต้องรันหลังจากที่ db พร้อมทำงานแล้ว
+      db:
+        condition: service_healthy
+    # สั่ง migrate up
+    command: -verbose -path=/migrations/ -database "postgres://postgres:postgres@db:5432/go-mma-db?sslmode=disable" up
+
+  app:
+    build: .
+    image: go-mma-api
+    container_name: go-mma-api
+    environment:
+      - GRACEFUL_TIMEOUT=5s
+      - DB_DSN=postgres://postgres:postgres@db:5432/go-mma-db?sslmode=disable
+      - GATEWAY_HOST=localhost
+      - GATEWAY_BASEURL=/api/v1
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      db:
+        # ต้องรันหลังจากที่ db พร้อมทำงานแล้ว
+        condition: service_healthy 
+      migrate:
+        # ต้องรันหลังจากที่ migrate ทำงานสำเร็จแล้ว
+        condition: service_completed_successfully
+
+  proxy:
+    image: nginx:1.29.0-alpine
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+    volumes:
+      # เรียกใช้ config/nginx.conf
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - frontend
+    depends_on:
+      app:
+        # ต้องรันหลังจากที่ app เริ่มทำงานแล้ว
+        condition: service_started

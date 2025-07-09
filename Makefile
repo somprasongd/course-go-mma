@@ -35,6 +35,14 @@ devup:
 devdown:
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
+.PHONY: produp
+produp:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+.PHONY: proddown
+proddown:
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+
 .PHONY: mgc
 # Example: make mgc filename=create_customer
 mgc:
