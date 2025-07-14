@@ -39,7 +39,7 @@ func main() {
 	}
 	defer func() { // ใช่ท่า IIFE เพราะต้องการแสดง error ถ้าปิดไม่ได้
 		if err := closeDB(); err != nil {
-			logger.Log.Error(fmt.Sprintf("Error closing database: %v", err))
+			logger.Log().Error(fmt.Sprintf("Error closing database: %v", err))
 		}
 	}()
 
@@ -62,11 +62,11 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
-	logger.Log.Info("Shutting down...")
+	logger.Log().Info("Shutting down...")
 
 	app.Shutdown()
 
 	// Optionally: แล้วค่อยปิด resource อื่นๆ เช่น DB connection, cleanup, etc.
 
-	logger.Log.Info("Shutdown complete.")
+	logger.Log().Info("Shutdown complete.")
 }

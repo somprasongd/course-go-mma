@@ -42,7 +42,7 @@ func (h *createCustomerCommandHandler) Handle(ctx context.Context, cmd *CreateCu
 		// ส่งไปที่ Repository Layer เพื่อบันทึกข้อมูลลงฐานข้อมูล
 		if err := h.custRepo.Create(ctx, customer); err != nil {
 			// error logging
-			logger.Log.Error(err.Error())
+			logger.FromContext(ctx).Error(err.Error())
 			return err
 		}
 
@@ -69,7 +69,7 @@ func (h *createCustomerCommandHandler) validateBusinessInvariant(ctx context.Con
 	exists, err := h.custRepo.ExistsByEmail(ctx, cmd.Email)
 	if err != nil {
 		// error logging
-		logger.Log.Error(err.Error())
+		logger.FromContext(ctx).Error(err.Error())
 		return err
 	}
 

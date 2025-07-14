@@ -29,7 +29,7 @@ func (h *cancelOrderCommandHandler) Handle(ctx context.Context, cmd *CancelOrder
 		// Business Logic Rule: ตรวจสอบ order id
 		order, err := h.orderRepo.FindByIDForUpdate(ctx, cmd.ID)
 		if err != nil {
-			logger.Log.Error(err.Error())
+			logger.FromContext(ctx).Error(err.Error())
 			return err
 		}
 
@@ -39,7 +39,7 @@ func (h *cancelOrderCommandHandler) Handle(ctx context.Context, cmd *CancelOrder
 
 		// ยกเลิก order
 		if err := h.orderRepo.Cancel(ctx, order.ID); err != nil {
-			logger.Log.Error(err.Error())
+			logger.FromContext(ctx).Error(err.Error())
 			return err
 		}
 

@@ -1,13 +1,14 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"go-mma/shared/common/logger"
 )
 
 // --> Step 1: สร้าง interface
 type NotificationService interface {
-	SendEmail(to string, subject string, payload map[string]any) error
+	SendEmail(ctx context.Context, to string, subject string, payload map[string]any) error
 }
 
 // --> Step 2: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
@@ -20,8 +21,8 @@ func NewNotificationService() NotificationService {
 }
 
 // --> Step 5: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
-func (s *notificationService) SendEmail(to string, subject string, payload map[string]any) error {
+func (s *notificationService) SendEmail(ctx context.Context, to string, subject string, payload map[string]any) error {
 	// implement email sending logic here
-	logger.Log.Info(fmt.Sprintf("Sending email to %s with subject: %s and payload: %v", to, subject, payload))
+	logger.FromContext(ctx).Info(fmt.Sprintf("Sending email to %s with subject: %s and payload: %v", to, subject, payload))
 	return nil
 }

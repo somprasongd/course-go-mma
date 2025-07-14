@@ -56,9 +56,9 @@ func newFiber(config config.Config) *fiber.App {
 
 func (s *httpServer) Start() {
 	go func() {
-		logger.Log.Info(fmt.Sprintf("Starting server on port %d", s.config.HTTPPort))
+		logger.Log().Info(fmt.Sprintf("Starting server on port %d", s.config.HTTPPort))
 		if err := s.app.Listen(fmt.Sprintf(":%d", s.config.HTTPPort)); err != nil && err != http.ErrServerClosed {
-			logger.Log.Fatal(fmt.Sprintf("Error starting server: %v", err))
+			logger.Log().Fatal(fmt.Sprintf("Error starting server: %v", err))
 		}
 	}()
 }

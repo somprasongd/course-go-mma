@@ -24,7 +24,7 @@ func (h *welcomeEmailHandler) Handle(ctx context.Context, evt eventbus.Event) er
 		return fmt.Errorf("invalid event type")
 	}
 
-	return h.notiService.SendEmail(e.Email, "Welcome to our service!", map[string]any{
+	return h.notiService.SendEmail(ctx, e.Email, "Welcome to our service!", map[string]any{
 		"message": "Thank you for joining us! We are excited to have you as a member.",
 	})
 }

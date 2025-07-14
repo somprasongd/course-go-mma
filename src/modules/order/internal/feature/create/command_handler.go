@@ -56,16 +56,20 @@ func (h *createOrderCommandHandler) Handle(ctx context.Context, cmd *CreateOrder
 		// บันทึกลงฐานข้อมูล
 		err := h.orderRepo.Create(ctx, order)
 		if err != nil {
-			logger.Log.Error(err.Error())
+			logger.FromContext(ctx).Error(err.Error())
 			return err
 		}
 
 		// ส่งอีเมลยืนยันหลัง commit
 		registerPostCommitHook(func(ctx context.Context) error {
-			return h.notiSvc.SendEmail(customer.Email, "Order Created", map[string]any{
-				"order_id": order.ID,
-				"total":    order.OrderTotal,
-			})
+			return h.notiSvc.SendEmail(
+				ctx,
+				customer.Email,
+				"Order Created",
+				map[string]any{
+					"order_id": order.ID,
+					"total":    order.OrderTotal,
+				})
 		})
 
 		return nil

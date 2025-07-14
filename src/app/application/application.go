@@ -33,11 +33,11 @@ func (app *Application) Run() error {
 
 func (app *Application) Shutdown() error {
 	// Gracefully close fiber server
-	logger.Log.Info("Shutting down server")
+	logger.Log().Info("Shutting down server")
 	if err := app.httpServer.Shutdown(); err != nil {
-		logger.Log.Fatal(fmt.Sprintf("Error shutting down server: %v", err))
+		logger.Log().Fatal(fmt.Sprintf("Error shutting down server: %v", err))
 	}
-	logger.Log.Info("Server stopped")
+	logger.Log().Info("Server stopped")
 
 	return nil
 }

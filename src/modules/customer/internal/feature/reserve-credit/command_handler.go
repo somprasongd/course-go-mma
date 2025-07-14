@@ -29,7 +29,7 @@ func (h *reserveCreditCommandHandler) Handle(ctx context.Context, cmd *customerc
 	err := h.transactor.WithinTransaction(ctx, func(ctx context.Context, registerPostCommitHook func(transactor.PostCommitHook)) error {
 		customer, err := h.custRepo.FindByIDForUpdate(ctx, cmd.CustomerID)
 		if err != nil {
-			logger.Log.Error(err.Error())
+			logger.FromContext(ctx).Error(err.Error())
 			return err
 		}
 
@@ -42,7 +42,7 @@ func (h *reserveCreditCommandHandler) Handle(ctx context.Context, cmd *customerc
 		}
 
 		if err := h.custRepo.UpdateCredit(ctx, customer); err != nil {
-			logger.Log.Error(err.Error())
+			logger.FromContext(ctx).Error(err.Error())
 			return errs.DatabaseFailureError(err.Error())
 		}
 
