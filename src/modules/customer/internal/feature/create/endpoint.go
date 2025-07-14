@@ -31,7 +31,7 @@ func createCustomerHTTPHandler(c fiber.Ctx) error {
 		return errs.InputValidationError(err.Error())
 	}
 
-	logger.Log.Info(fmt.Sprintf("Received customer: %v", req))
+	logger.FromContext(c.Context()).Info(fmt.Sprintf("Received customer: %v", req))
 
 	// ตรวจสอบ input fields (e.g., value, format, etc.)
 	if err := req.Validate(); err != nil {

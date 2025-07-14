@@ -94,11 +94,11 @@ func (t *sqlTransactor) WithinTransaction(ctx context.Context, txFunc func(ctxWi
 				defer func() {
 					if r := recover(); r != nil {
 						// Log panic ที่เกิดใน hook
-						logger.Log.Error(fmt.Sprintf("post-commit hook panic: %v", r))
+						logger.Log().Error(fmt.Sprintf("post-commit hook panic: %v", r))
 					}
 				}()
 				if err := h(ctx); err != nil {
-					logger.Log.Error(fmt.Sprintf("post-commit hook error: %v", err))
+					logger.Log().Error(fmt.Sprintf("post-commit hook error: %v", err))
 				}
 			}(hook)
 		}

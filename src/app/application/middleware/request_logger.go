@@ -20,6 +20,11 @@ func RequestLogger() fiber.Handler {
 			zap.String("path", c.Path()),
 		)
 
+		// สร้าง Context ใหม่ที่มี logger (จะได้ใช้ logger ตัวเดียวใน handler)
+		ctx := logger.NewContext(c.Context(), log)
+		// แทน Context เดิม
+		c.SetContext(ctx)
+
 		// catch panic
 		defer func() {
 			if r := recover(); r != nil {

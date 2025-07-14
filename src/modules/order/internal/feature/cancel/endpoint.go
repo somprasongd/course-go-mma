@@ -33,7 +33,7 @@ func cancelOrderHTTPHandler(c fiber.Ctx) error {
 		return errs.InputValidationError("invalid order id")
 	}
 
-	logger.Log.Info(fmt.Sprintf("Cancelling order: %v", orderID))
+	logger.FromContext(c.Context()).Info(fmt.Sprintf("Cancelling order: %v", orderID))
 
 	// ส่งไปที่ Command Handler
 	_, err = mediator.Send[*CancelOrderCommand, *mediator.NoResponse](
