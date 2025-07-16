@@ -3,25 +3,32 @@ package logger
 import (
 	"context"
 
-	"go.elastic.co/ecszap"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type closeLog func() error
 
 var baseLogger *zap.Logger
 
-func Init() (closeLog, error) {
-	config := zap.NewDevelopmentConfig()
-	// ใช้ zap ร่วมกับ ecszap เพื่อให้รองรับการส่ง log ไปยัง Elastic Stack ได้ในอนาคต
-	config.EncoderConfig = ecszap.ECSCompatibleEncoderConfig(config.EncoderConfig)
+func Init(serviceName string) (closeLog, error) {
+	config := zap.NewProductionConfig() // ใช้ production config → output เป็น JSON
+
+	// ตั้งค่า key ของ field ให้ตรงกับ OTel semantic convention
+	config.EncoderConfig.TimeKey = "timestamp"
+	config.EncoderConfig.LevelKey = "severity"
+	config.EncoderConfig.MessageKey = "message"
+	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
 	var err error
-	baseLogger, err = config.Build(ecszap.WrapCoreOption())
+	zlog, err := config.Build()
 
 	if err != nil {
 		return nil, err
 	}
+
+	baseLogger = zlog.With(zap.String("service.name", serviceName))
 
 	return func() error {
 		return baseLogger.Sync()
@@ -44,8 +51,19 @@ func NewContext(parent context.Context, logger *zap.Logger) context.Context {
 
 func FromContext(ctx context.Context) *zap.Logger {
 	log, ok := ctx.Value(loggerKey{}).(*zap.Logger)
-	if ok {
-		return log
+	if !ok {
+		log = baseLogger
 	}
-	return baseLogger
+
+	// ดึง trace_id + span_id จาก OTel context
+	span := trace.SpanContextFromContext(ctx)
+
+	if span.IsValid() {
+		return log.With(
+			zap.String("trace_id", span.TraceID().String()), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+			zap.String("span_id", span.SpanID().String()),   // เพิ่ม span_id เพื่อเชื่อมโยง log กับ trace
+		)
+	}
+
+	return log
 }

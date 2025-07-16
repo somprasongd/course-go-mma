@@ -12,7 +12,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
 
 type HTTPServer interface {
@@ -39,10 +38,9 @@ func newFiber(config config.Config) *fiber.App {
 	})
 
 	// global middleware
+	app.Use(middleware.Observability()) // จัดการ log + trace + metric
 	app.Use(cors.New())                 // CORS ลำดับแรก เพื่อให้ OPTIONS request ผ่านได้เสมอ
-	app.Use(requestid.New())            // สร้าง request id ใน request header สำหรับการ debug
 	app.Use(recover.New())              // auto-recovers from panic (internal only)
-	app.Use(middleware.RequestLogger()) // logs HTTP request
 	app.Use(middleware.ResponseError())
 
 	app.Get("/docs/*", middleware.APIDoc(config))

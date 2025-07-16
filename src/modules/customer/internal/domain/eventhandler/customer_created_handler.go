@@ -6,6 +6,8 @@ import (
 	"go-mma/shared/common/domain"
 	"go-mma/shared/common/eventbus"
 	"go-mma/shared/messaging"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // customerCreatedDomainEventHandler คือ handler สำหรับจัดการ event ประเภท CustomerCreatedDomainEvent
@@ -22,6 +24,10 @@ func NewCustomerCreatedDomainEventHandler(eventBus eventbus.EventBus) domain.Dom
 
 // Handle คือฟังก์ชันหลักที่ถูกเรียกเมื่อมี event ถูก dispatch มา
 func (h *customerCreatedDomainEventHandler) Handle(ctx context.Context, evt domain.DomainEvent) error {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("domain_event")
+	ctx, span := tracer.Start(ctx, "DomainEvent:CreateCustomer")
+	defer span.End()
+
 	// แปลง (type assert) event ที่รับมาเป็น pointer ของ CustomerCreatedDomainEvent
 	e, ok := evt.(*event.CustomerCreatedDomainEvent)
 	if !ok {

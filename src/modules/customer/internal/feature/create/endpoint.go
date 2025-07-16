@@ -7,6 +7,7 @@ import (
 	"go-mma/shared/common/mediator"
 
 	"github.com/gofiber/fiber/v3"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func NewEndpoint(router fiber.Router, path string) {
@@ -24,6 +25,11 @@ func NewEndpoint(router fiber.Router, path string) {
 // @Success		201	{object}	CreateCustomerResponse
 // @Router			/customers [post]
 func createCustomerHTTPHandler(c fiber.Ctx) error {
+	ctx := c.Context()
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("http_handler")
+	ctx, span := tracer.Start(ctx, "Endpoint:CreateCustomer")
+	defer span.End()
+
 	// แปลง request body -> dto
 	var req CreateCustomerRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -31,7 +37,7 @@ func createCustomerHTTPHandler(c fiber.Ctx) error {
 		return errs.InputValidationError(err.Error())
 	}
 
-	logger.FromContext(c.Context()).Info(fmt.Sprintf("Received customer: %v", req))
+	logger.FromContext(ctx).Info(fmt.Sprintf("Received customer: %v", req))
 
 	// ตรวจสอบ input fields (e.g., value, format, etc.)
 	if err := req.Validate(); err != nil {
@@ -41,7 +47,7 @@ func createCustomerHTTPHandler(c fiber.Ctx) error {
 
 	// *** ส่งไปที่ Command Handler แทน Service ***
 	resp, err := mediator.Send[*CreateCustomerCommand, *CreateCustomerCommandResult](
-		c.Context(),
+		ctx,
 		&CreateCustomerCommand{CreateCustomerRequest: req},
 	)
 

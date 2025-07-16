@@ -4,7 +4,94 @@ networks:
   # network สำหรับ services ภายใน
   backend:
 
+volumes:
+  loki_data:
+  grafana-data:
+  prometheus-data:
+
 services:
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+    # ports:
+    #   - "3100:3100" 
+    networks:
+      - backend
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./config/promtail-config.yml:/etc/promtail/promtail-config.yml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yml
+    networks:
+      - backend
+    depends_on:
+      - loki
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: otel-collector
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otelcol/config.yaml
+    command: ["--config=/etc/otelcol/config.yaml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC
+    #   - "4318:4318"   # OTLP HTTP
+    #   - "9464:9464"   # Prometheus scrape metrics endpoint
+    #   - "13133:13133" # Health check (extension)
+    networks:
+      - backend
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    # ports:
+    #   - "3200" # tempo
+    #   - "4317" # otlp grpc
+    networks:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    # ports:
+    #   - "9090:9090"
+    networks:
+      - backend
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - backend
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+      - tempo
+      - prometheus
+
   db:
     environment:
       POSTGRES_DB: go-mma-db
@@ -41,6 +128,7 @@ services:
       - DB_DSN=postgres://postgres:postgres@db:5432/go-mma-db?sslmode=disable
       - GATEWAY_HOST=localhost
       - GATEWAY_BASEURL=/api/v1
+      - OTEL_EXPORTER_ENDPOINT=otel-collector:4317
     networks:
       - frontend
       - backend
@@ -51,6 +139,18 @@ services:
       migrate:
         # ต้องรันหลังจากที่ migrate ทำงานสำเร็จแล้ว
         condition: service_completed_successfully
+      otel-collector:
+        # ต้องรันหลังจากที่ otel-collector เริ่มทำงานแล้ว
+        condition: service_started
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # เพิ่ม label สำหรับ filtering logs
+    labels:
+      logging: "promtail"
+      logging_jobname: "containerlogs"
 
   proxy:
     image: nginx:1.29.0-alpine

@@ -7,8 +7,8 @@ run:
 	go run cmd/api/main.go
 
 ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
-# ถ้า BUILD_VERSION ไม่ถูกเซ็ตใน .env, ให้ใช้ git tag ล่าสุด (ถ้าไม่มี tag จะ fallback เป็น "unknown")
-BUILD_VERSION := $(or ${BUILD_VERSION}, $(shell git describe --tags --abbrev=0 2>/dev/null || echo "unknown"))
+# ถ้า BUILD_VERSION ไม่ถูกเซ็ตใน .env, ให้ใช้ git tag ล่าสุด (ถ้าไม่มี tag จะ fallback เป็น "latest")
+BUILD_VERSION := $(or ${BUILD_VERSION}, $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest"))
 BUILD_TIME := $(shell date +"%Y-%m-%dT%H:%M:%S%z")
 
 .PHONY: build
@@ -23,7 +23,7 @@ build:
 .PHONY: image
 image:
 	docker build \
-	-t go-mma:${BUILD_VERSION} \
+	-t go-mma-api:${BUILD_VERSION} \
 	--build-arg VERSION=${BUILD_VERSION} \
 	.
 

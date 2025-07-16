@@ -14,20 +14,24 @@ var (
 
 // รวมการโหลดค่าคอนฟิกทั้งหมดไว้ในจุดเดียว
 type Config struct {
-	HTTPPort        int
-	GracefulTimeout time.Duration
-	DSN             string
-	GatewayHost     string
-	GatewayBasePath string
+	HTTPPort            int
+	GracefulTimeout     time.Duration
+	DSN                 string
+	GatewayHost         string
+	GatewayBasePath     string
+	AppName             string
+	OtelExporterEnpoint string
 }
 
 func Load() (*Config, error) {
 	config := &Config{
-		HTTPPort:        env.GetIntDefault("HTTP_PORT", 8090),
-		GracefulTimeout: env.GetDurationDefault("GRACEFUL_TIMEOUT", 5*time.Second),
-		DSN:             env.Get("DB_DSN"),
-		GatewayHost:     env.Get("GATEWAY_HOST"),
-		GatewayBasePath: env.GetDefault("GATEWAY_BASEURL", "/api/v1"),
+		HTTPPort:            env.GetIntDefault("HTTP_PORT", 8090),
+		GracefulTimeout:     env.GetDurationDefault("GRACEFUL_TIMEOUT", 5*time.Second),
+		DSN:                 env.Get("DB_DSN"),
+		GatewayHost:         env.Get("GATEWAY_HOST"),
+		GatewayBasePath:     env.GetDefault("GATEWAY_BASEURL", "/api/v1"),
+		AppName:             env.GetDefault("APP_NAME", "go-mma-api"),
+		OtelExporterEnpoint: env.Get("OTEL_EXPORTER_ENDPOINT"),
 	}
 	err := config.Validate()
 	if err != nil {
