@@ -8,6 +8,8 @@ import (
 	"go-mma/shared/common/domain"
 	"go-mma/shared/common/logger"
 	"go-mma/shared/common/storage/sqldb/transactor"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 type createCustomerCommandHandler struct {
@@ -28,6 +30,10 @@ func NewCreateCustomerCommandHandler(
 }
 
 func (h *createCustomerCommandHandler) Handle(ctx context.Context, cmd *CreateCustomerCommand) (*CreateCustomerCommandResult, error) {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("command_handler")
+	ctx, span := tracer.Start(ctx, "Handle:CreateCustomerCommand")
+	defer span.End()
+
 	// ตรวจสอบ business rule/invariant
 	if err := h.validateBusinessInvariant(ctx, cmd); err != nil {
 		return nil, err

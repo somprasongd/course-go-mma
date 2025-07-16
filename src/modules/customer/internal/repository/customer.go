@@ -8,6 +8,8 @@ import (
 	"go-mma/shared/common/errs"
 	"go-mma/shared/common/storage/sqldb/transactor"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // --> Step 1: สร้าง interface
@@ -31,6 +33,10 @@ func NewCustomerRepository(dbCtx transactor.DBTXContext) CustomerRepository {
 }
 
 func (r *customerRepository) Create(ctx context.Context, customer *model.Customer) error {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("repository")
+	ctx, span := tracer.Start(ctx, "Repository:CustomerRepository:Create")
+	defer span.End()
+
 	query := `
 	INSERT INTO customer.customers (id, email, credit)
 	VALUES ($1, $2, $3)
@@ -51,6 +57,10 @@ func (r *customerRepository) Create(ctx context.Context, customer *model.Custome
 }
 
 func (r *customerRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("repository")
+	ctx, span := tracer.Start(ctx, "Repository:CustomerRepository:ExistsByEmail")
+	defer span.End()
+
 	query := `SELECT 1 FROM customer.customers WHERE email = $1 LIMIT 1`
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -70,6 +80,10 @@ func (r *customerRepository) ExistsByEmail(ctx context.Context, email string) (b
 }
 
 func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Customer, error) {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("repository")
+	ctx, span := tracer.Start(ctx, "Repository:CustomerRepository:FindByID")
+	defer span.End()
+
 	query := `
 	SELECT *
 	FROM customer.customers
@@ -91,6 +105,10 @@ func (r *customerRepository) FindByID(ctx context.Context, id int64) (*model.Cus
 }
 
 func (r *customerRepository) FindByIDForUpdate(ctx context.Context, id int64) (*model.Customer, error) {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("repository")
+	ctx, span := tracer.Start(ctx, "Repository:CustomerRepository:FindByIDForUpdate")
+	defer span.End()
+
 	query := `
 	SELECT *
 	FROM customer.customers
@@ -113,6 +131,10 @@ func (r *customerRepository) FindByIDForUpdate(ctx context.Context, id int64) (*
 }
 
 func (r *customerRepository) UpdateCredit(ctx context.Context, m *model.Customer) error {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("repository")
+	ctx, span := tracer.Start(ctx, "Repository:CustomerRepository:UpdateCredit")
+	defer span.End()
+
 	query := `
 	UPDATE customer.customers
 	SET credit = $2

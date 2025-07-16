@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"go-mma/modules/order"
 	"go-mma/shared/common/logger"
 	"go-mma/shared/common/module"
+	"go-mma/shared/common/observability"
 	"go-mma/shared/common/storage/sqldb"
 	"go-mma/shared/common/storage/sqldb/transactor"
 )
@@ -22,16 +24,22 @@ import (
 // //  @name						Authorization
 // //  @description				Enter the token with the `Bearer: ` prefix, e.g. "Bearer YOUR_JWT_TOKEN"
 func main() {
-	closeLog, err := logger.Init()
+	config, err := config.Load()
+	if err != nil {
+		panic(err.Error())
+	}
+
+	closeLog, err := logger.Init(config.AppName)
 	if err != nil {
 		panic(err.Error())
 	}
 	defer closeLog()
 
-	config, err := config.Load()
+	shutdown, err := observability.InitOtlp(context.Background(), config.OtelExporterEnpoint, config.AppName)
 	if err != nil {
 		panic(err.Error())
 	}
+	defer shutdown(context.Background())
 
 	dbCtx, closeDB, err := sqldb.NewDBContext(config.DSN)
 	if err != nil {

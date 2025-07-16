@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"go-mma/shared/common/logger"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // --> Step 1: สร้าง interface
@@ -22,6 +24,10 @@ func NewNotificationService() NotificationService {
 
 // --> Step 5: เปลี่ยนชื่อ struct เป็นตัวพิมพ์เล็ก
 func (s *notificationService) SendEmail(ctx context.Context, to string, subject string, payload map[string]any) error {
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("service")
+	ctx, span := tracer.Start(ctx, "Service:SendEmail")
+	defer span.End()
+
 	// implement email sending logic here
 	logger.FromContext(ctx).Info(fmt.Sprintf("Sending email to %s with subject: %s and payload: %v", to, subject, payload))
 	return nil
