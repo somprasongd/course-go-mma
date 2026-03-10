@@ -6,7 +6,7 @@ import (
 )
 
 type CreateCustomerRequest struct {
-	Email  string `json:"email"`
+	Email  string `json:"email" sanitize:"email"`
 	Credit int    `json:"credit"`
 }
 

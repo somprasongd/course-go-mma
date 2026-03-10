@@ -5,6 +5,7 @@ import (
 	"go-mma/shared/common/errs"
 	"go-mma/shared/common/logger"
 	"go-mma/shared/common/mediator"
+	"go-mma/shared/common/sanitizer"
 
 	"github.com/gofiber/fiber/v3"
 	"go.opentelemetry.io/otel/trace"
@@ -36,6 +37,9 @@ func createCustomerHTTPHandler(c fiber.Ctx) error {
 		// จัดการ error response ที่ middleware
 		return errs.InputValidationError(err.Error())
 	}
+
+	// Sanitize inputs using struct tags to prevent XSS attacks
+	sanitizer.SanitizeStruct(&req)
 
 	logger.FromContext(ctx).Info(fmt.Sprintf("Received customer: %v", req))
 
